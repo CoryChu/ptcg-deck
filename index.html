@@ -519,17 +519,6 @@
       && typeof require === 'function';
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
-    const DEBUG_LOG = '/Users/corychu/Desktop/Cory/Cursor/.cursor/debug-40b010.log';
-
-    function agentLog(location, message, data, hypothesisId, runId = 'post-fix') {
-      const payload = { sessionId: '40b010', location, message, data, timestamp: Date.now(), hypothesisId, runId };
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify(payload)}).catch(()=>{});
-      if (isElectron) {
-        try { require('fs').appendFileSync(DEBUG_LOG, `${JSON.stringify(payload)}\n`); } catch (_) { /* ignore */ }
-      }
-      // #endregion
-    }
 
     const CARDS_PER_PAGE = 8;
     const DECK_VERSION = 1;
@@ -1032,10 +1021,7 @@
 
     async function handleDrop(dataTransfer) {
       const now = Date.now();
-      if (dropLock || now - lastDropAt < 800) {
-        agentLog('index.html:handleDrop', 'skipped duplicate drop', { dropLock, msSinceLast: now - lastDropAt }, 'F', 'drop-fix');
-        return;
-      }
+      if (dropLock || now - lastDropAt < 800) return;
       dropLock = true;
       lastDropAt = now;
 
@@ -1043,13 +1029,6 @@
       const allUrls = await extractImageUrlsAsync(dataTransfer);
       const bestUrl = pickBestImageUrls(allUrls, 1)[0];
       const bestFile = pickBestImageFile(imageFiles);
-
-      agentLog('index.html:handleDrop', 'drop parsed', {
-        rawFileCount: imageFiles.length,
-        urlCount: allUrls.length,
-        bestUrl: bestUrl ? urlDedupeKey(bestUrl) : null,
-        bestFileSize: bestFile?.size || 0,
-      }, 'A,B,C', 'drop-fix');
 
       if (!bestFile && !bestUrl) {
         dropLock = false;
@@ -1074,7 +1053,6 @@
           await addCardFromFile(bestFile);
           deckStatus.textContent = '已加入 1 張圖片';
         }
-        agentLog('index.html:handleDrop', 'added one card', { cardsNow: cards.length }, 'A,B,C', 'drop-fix');
       } catch {
         deckStatus.textContent = '無法載入圖片（該網站封鎖外連，請先下載再拖入）';
       } finally {
