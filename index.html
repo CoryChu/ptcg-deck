@@ -2,7 +2,8 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="PTCG Deck">
   <link rel="apple-touch-icon" href="assets/logo.png">
@@ -164,12 +165,15 @@
       overflow: hidden;
     }
 
-    .preview-card img {
+    .preview-card-img {
       width: 100%;
       aspect-ratio: 63 / 88;
       object-fit: cover;
       display: block;
       background: #000;
+      cursor: zoom-in;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
 
     .preview-card-controls {
@@ -178,12 +182,14 @@
       justify-content: space-between;
       padding: 0.5rem 0.75rem;
       gap: 0.5rem;
+      touch-action: manipulation;
     }
 
     .qty-group {
       display: flex;
       align-items: center;
       gap: 0.25rem;
+      touch-action: manipulation;
     }
 
     .qty-group button {
@@ -196,6 +202,9 @@
       cursor: pointer;
       font-size: 1rem;
       line-height: 1;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
     }
 
     .qty-group button:hover { border-color: var(--accent); }
@@ -208,7 +217,47 @@
       background: var(--bg);
       color: var(--text);
       border-radius: 6px;
-      font-size: 0.9rem;
+      font-size: 16px;
+      touch-action: manipulation;
+    }
+
+    .image-lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 11000;
+      background: rgba(0, 0, 0, 0.94);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+    }
+
+    .image-lightbox.is-open {
+      display: flex;
+    }
+
+    .image-lightbox-toolbar {
+      position: absolute;
+      top: max(0.75rem, env(safe-area-inset-top));
+      right: max(0.75rem, env(safe-area-inset-right));
+      z-index: 1;
+    }
+
+    .image-lightbox img {
+      max-width: 100%;
+      max-height: calc(100vh - 5rem);
+      max-height: calc(100dvh - 5rem);
+      object-fit: contain;
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .image-lightbox-hint {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-align: center;
     }
 
     .btn-delete {
@@ -438,6 +487,23 @@
         gap: 0.75rem;
       }
 
+      .qty-group button {
+        width: 44px;
+        height: 44px;
+        font-size: 1.25rem;
+      }
+
+      .qty-group input {
+        width: 52px;
+        min-height: 44px;
+      }
+
+      .btn-delete {
+        min-height: 44px;
+        padding: 0.4rem 0.65rem;
+        touch-action: manipulation;
+      }
+
       .preview-pages { transform: scale(0.32); }
     }
 
@@ -498,6 +564,14 @@
 
   <script src="assets/jspdf.umd.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js'"></script>
 
+  <div id="imageLightbox" class="image-lightbox" role="dialog" aria-modal="true" aria-label="卡牌大圖預覽">
+    <div class="image-lightbox-toolbar">
+      <button id="btnCloseLightbox" class="btn btn-secondary" type="button">關閉</button>
+    </div>
+    <img id="lightboxImg" src="" alt="">
+    <p class="image-lightbox-hint">點擊背景或按關閉返回</p>
+  </div>
+
   <div id="previewOverlay" class="preview-overlay">
     <div class="preview-toolbar">
       <span id="previewInfo">排版預覽</span>
@@ -541,6 +615,9 @@
     const previewRoot = document.getElementById('previewRoot');
     const previewInfo = document.getElementById('previewInfo');
     const btnClosePreview = document.getElementById('btnClosePreview');
+    const imageLightbox = document.getElementById('imageLightbox');
+    const lightboxImg = document.getElementById('lightboxImg');
+    const btnCloseLightbox = document.getElementById('btnCloseLightbox');
     const fileInputImages = document.getElementById('fileInputImages');
     const fileInputDeck = document.getElementById('fileInputDeck');
 
@@ -1089,10 +1166,21 @@
       fileInputImages.value = '';
     });
 
+    function openImageLightbox(card) {
+      lightboxImg.src = card.src;
+      lightboxImg.alt = card.name;
+      imageLightbox.classList.add('is-open');
+    }
+
+    function closeImageLightbox() {
+      imageLightbox.classList.remove('is-open');
+      lightboxImg.src = '';
+    }
+
     function renderPreview() {
       previewGrid.innerHTML = cards.map(card => `
         <div class="preview-card" data-id="${card.id}">
-          <img src="${card.src}" alt="${card.name}">
+          <img class="preview-card-img" src="${card.src}" alt="${card.name}" data-action="view" data-id="${card.id}">
           <div class="preview-card-controls">
             <div class="qty-group">
               <button type="button" data-action="dec" data-id="${card.id}">−</button>
@@ -1105,6 +1193,18 @@
       `).join('');
     }
 
+    let lastQtyTouchAt = 0;
+
+    function adjustCardQuantity(card, action) {
+      if (action === 'inc') {
+        card.quantity = Math.min(999, card.quantity + 1);
+      } else if (action === 'dec') {
+        card.quantity = Math.max(0, card.quantity - 1);
+      }
+      renderPreview();
+      updateUI();
+    }
+
     previewGrid.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-action]');
       if (!btn) return;
@@ -1112,17 +1212,33 @@
       const card = cards.find(c => c.id === id);
       if (!card) return;
 
-      if (btn.dataset.action === 'inc') {
-        card.quantity = Math.min(999, card.quantity + 1);
-      } else if (btn.dataset.action === 'dec') {
-        card.quantity = Math.max(0, card.quantity - 1);
-      } else if (btn.dataset.action === 'del') {
+      if (btn.dataset.action === 'view') {
+        openImageLightbox(card);
+        return;
+      }
+      if (btn.dataset.action === 'inc' || btn.dataset.action === 'dec') {
+        if (Date.now() - lastQtyTouchAt < 400) return;
+        adjustCardQuantity(card, btn.dataset.action);
+        return;
+      }
+      if (btn.dataset.action === 'del') {
         const idx = cards.indexOf(card);
         cards.splice(idx, 1);
+        renderPreview();
+        updateUI();
       }
-      renderPreview();
-      updateUI();
     });
+
+    previewGrid.addEventListener('touchend', (e) => {
+      const btn = e.target.closest('[data-action="inc"], [data-action="dec"]');
+      if (!btn) return;
+      e.preventDefault();
+      lastQtyTouchAt = Date.now();
+      const id = Number(btn.dataset.id);
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+      adjustCardQuantity(card, btn.dataset.action);
+    }, { passive: false });
 
     previewGrid.addEventListener('change', (e) => {
       if (e.target.tagName !== 'INPUT') return;
@@ -1256,8 +1372,21 @@
       if (e.target === previewOverlay) closePreview();
     });
 
+    btnCloseLightbox.addEventListener('click', closeImageLightbox);
+
+    imageLightbox.addEventListener('click', (e) => {
+      if (e.target === imageLightbox || e.target.classList.contains('image-lightbox-hint')) {
+        closeImageLightbox();
+      }
+    });
+
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && previewOverlay.classList.contains('is-open')) {
+      if (e.key !== 'Escape') return;
+      if (imageLightbox.classList.contains('is-open')) {
+        closeImageLightbox();
+        return;
+      }
+      if (previewOverlay.classList.contains('is-open')) {
         closePreview();
       }
     });
