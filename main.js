@@ -52,34 +52,71 @@ ipcMain.handle('open-deck', async () => {
   return { ok: true, filePath: filePaths[0], deckData };
 });
 
-ipcMain.handle('fetch-image-url', async (_event, url) => {
+function detectImageMime(buffer) {
+  if (buffer.length < 4) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
+  if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
+  if (buffer[0] === 0x47 && buffer[1] === 0x49) return 'image/gif';
+  if (buffer[0] === 0x52 && buffer[1] === 0x49) return 'image/webp';
+  return null;
+}
+
+async function fetchImageBuffer(url, referer) {
+  const parsed = new URL(url);
+  const originReferer = `${parsed.protocol}//${parsed.host}/`;
+  const variants = [url];
+  const noQuery = parsed.origin + parsed.pathname;
+  if (noQuery !== url) variants.push(noQuery);
+
+  let lastError = 'fetch failed';
+
+  for (const variant of variants) {
+    const response = await fetch(variant, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+        Referer: referer || originReferer,
+      },
+      redirect: 'follow',
+    });
+
+    if (!response.ok) {
+      lastError = `HTTP ${response.status}`;
+      continue;
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    let contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || '';
+
+    if (!contentType.startsWith('image/')) {
+      const detected = detectImageMime(buffer);
+      if (detected) contentType = detected;
+      else {
+        lastError = 'not an image';
+        continue;
+      }
+    }
+
+    return { ok: true, contentType, buffer };
+  }
+
+  return { ok: false, error: lastError };
+}
+
+ipcMain.handle('fetch-image-url', async (_event, url, referer) => {
   try {
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       return { ok: false, error: 'invalid protocol' };
     }
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-        Accept: 'image/*,*/*',
-      },
-      redirect: 'follow',
-    });
+    const result = await fetchImageBuffer(url, referer);
+    if (!result.ok) return result;
 
-    if (!response.ok) {
-      return { ok: false, error: `HTTP ${response.status}` };
-    }
-
-    const contentType = response.headers.get('content-type')?.split(';')[0] || 'image/png';
-    if (!contentType.startsWith('image/')) {
-      return { ok: false, error: 'not an image' };
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
     return {
       ok: true,
-      dataUrl: `data:${contentType};base64,${buffer.toString('base64')}`,
+      dataUrl: `data:${result.contentType};base64,${result.buffer.toString('base64')}`,
     };
   } catch (err) {
     return { ok: false, error: err.message };

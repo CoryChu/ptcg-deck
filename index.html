@@ -647,10 +647,12 @@
 
     function isLikelyImageUrl(url) {
       if (url.startsWith('data:image/')) return true;
-      return /\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(url);
+      if (/^https?:\/\//i.test(url)) return true;
+      return /\.(png|jpe?g|webp|gif|bmp|avif|svg)(\?|#|$)/i.test(url);
     }
 
     function resolveUrl(src) {
+      if (!src || src.startsWith('data:')) return src;
       try {
         return new URL(src, window.location.href).href;
       } catch {
@@ -658,28 +660,124 @@
       }
     }
 
-    function extractImageUrlsFromDataTransfer(dt) {
+    function parseSrcset(srcset) {
+      const candidates = srcset.split(',').map((part) => {
+        const bits = part.trim().split(/\s+/);
+        const w = parseInt(bits[1], 10) || 0;
+        return { url: bits[0], w };
+      }).filter((c) => c.url);
+      candidates.sort((a, b) => b.w - a.w);
+      return candidates[0]?.url || null;
+    }
+
+    function addUrlsFromImg(img, urls) {
+      const attrs = ['src', 'data-src', 'data-lazy-src', 'data-original', 'data-url'];
+      const list = [];
+      attrs.forEach((attr) => {
+        const val = img.getAttribute(attr);
+        if (val) list.push(val);
+      });
+      const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+      if (srcset) {
+        const best = parseSrcset(srcset);
+        if (best) list.unshift(best);
+      }
+      list.forEach((src) => {
+        const resolved = resolveUrl(src);
+        if (resolved && isLikelyImageUrl(resolved)) urls.add(resolved);
+      });
+    }
+
+    function parseHtmlForUrls(html, urls) {
+      if (!html) return;
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      doc.querySelectorAll('img').forEach((img) => addUrlsFromImg(img, urls));
+      doc.querySelectorAll('[style*="background"]').forEach((el) => {
+        const match = el.getAttribute('style')?.match(/url\(["']?([^"')]+)["']?\)/i);
+        if (match?.[1]) {
+          const resolved = resolveUrl(match[1]);
+          if (isLikelyImageUrl(resolved)) urls.add(resolved);
+        }
+      });
+    }
+
+    function refererForUrl(url) {
+      try {
+        return `${new URL(url).origin}/`;
+      } catch {
+        return '';
+      }
+    }
+
+    function urlFetchVariants(url) {
+      const variants = [url];
+      try {
+        const u = new URL(url);
+        const noQuery = u.origin + u.pathname;
+        if (noQuery !== url) variants.push(noQuery);
+      } catch {
+        // keep original only
+      }
+      return [...new Set(variants)];
+    }
+
+    async function extractImageUrlsAsync(dt) {
       const urls = new Set();
 
-      const html = dt.getData('text/html');
-      if (html) {
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        doc.querySelectorAll('img[src]').forEach((img) => {
-          const src = img.getAttribute('src');
-          if (src) urls.add(resolveUrl(src));
-        });
-      }
+      parseHtmlForUrls(dt.getData('text/html'), urls);
 
       const uriList = dt.getData('text/uri-list') || dt.getData('text/plain') || '';
       uriList.split('\n').forEach((line) => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) return;
-        if (isLikelyImageUrl(trimmed) || trimmed.startsWith('http')) {
-          urls.add(resolveUrl(trimmed));
-        }
+        if (isLikelyImageUrl(trimmed)) urls.add(resolveUrl(trimmed));
       });
 
+      if (dt.items) {
+        const tasks = [];
+        for (const item of dt.items) {
+          if (item.kind === 'string' && item.type === 'text/html') {
+            tasks.push(new Promise((resolve) => {
+              item.getAsString((html) => {
+                parseHtmlForUrls(html, urls);
+                resolve();
+              });
+            }));
+          }
+          if (item.kind === 'string' && item.type === 'text/uri-list') {
+            tasks.push(new Promise((resolve) => {
+              item.getAsString((text) => {
+                text.split('\n').forEach((line) => {
+                  const trimmed = line.trim();
+                  if (trimmed && isLikelyImageUrl(trimmed)) urls.add(resolveUrl(trimmed));
+                });
+                resolve();
+              });
+            }));
+          }
+        }
+        await Promise.all(tasks);
+      }
+
       return [...urls];
+    }
+
+    function extractImageFiles(dt) {
+      const files = [];
+      if (dt.files?.length) {
+        Array.from(dt.files).forEach((f) => {
+          if (f.type.startsWith('image/')) files.push(f);
+        });
+      }
+      if (dt.items) {
+        for (const item of dt.items) {
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) files.push(file);
+          }
+        }
+      }
+      return files;
     }
 
     function blobToDataUrl(blob) {
@@ -711,45 +809,53 @@
       });
     }
 
-    async function fetchImageAsDataUrl(url) {
-      if (url.startsWith('data:image/')) return url;
-
+    async function fetchOneImage(url, referer) {
       if (isElectron) {
-        const result = await ipcRenderer.invoke('fetch-image-url', url);
+        const result = await ipcRenderer.invoke('fetch-image-url', url, referer);
         if (!result.ok) throw new Error(result.error || 'fetch failed');
         return result.dataUrl;
       }
 
-      const proxyUrl = `/api/fetch-image?url=${encodeURIComponent(url)}`;
-      try {
-        const proxyRes = await fetch(proxyUrl);
-        if (proxyRes.ok) {
-          return blobToDataUrl(await proxyRes.blob());
-        }
-      } catch {
-        // try next method
+      const proxyUrl = `/api/fetch-image?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer)}`;
+      const proxyRes = await fetch(proxyUrl);
+      if (proxyRes.ok) {
+        return blobToDataUrl(await proxyRes.blob());
       }
 
-      try {
-        const directRes = await fetch(url, { mode: 'cors' });
-        if (directRes.ok) {
-          return blobToDataUrl(await directRes.blob());
-        }
-      } catch {
-        // try canvas
+      const directRes = await fetch(url, { mode: 'cors' });
+      if (directRes.ok) {
+        return blobToDataUrl(await directRes.blob());
       }
 
       return imageUrlToDataUrlViaCanvas(url);
     }
 
+    async function fetchImageAsDataUrl(url) {
+      if (url.startsWith('data:image/')) return url;
+
+      const referer = refererForUrl(url);
+      const variants = urlFetchVariants(url);
+      let lastError;
+
+      for (const variant of variants) {
+        try {
+          return await fetchOneImage(variant, referer);
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      throw lastError || new Error('fetch failed');
+    }
+
     async function handleDrop(dataTransfer) {
-      const imageFiles = Array.from(dataTransfer.files).filter(f => f.type.startsWith('image/'));
+      const imageFiles = extractImageFiles(dataTransfer);
       if (imageFiles.length > 0) {
         imageFiles.forEach(addCard);
         return;
       }
 
-      const urls = extractImageUrlsFromDataTransfer(dataTransfer);
+      const urls = await extractImageUrlsAsync(dataTransfer);
       if (urls.length === 0) return;
 
       deckStatus.textContent = `正在載入 ${urls.length} 張圖片…`;
@@ -767,7 +873,7 @@
       }
 
       if (fail > 0) {
-        deckStatus.textContent = `已加入 ${ok} 張，${fail} 張無法載入（網站可能封鎖）`;
+        deckStatus.textContent = `已加入 ${ok} 張，${fail} 張無法載入（該網站封鎖外連，請先下載再拖入）`;
       } else if (ok > 0) {
         deckStatus.textContent = `已從網頁加入 ${ok} 張圖片`;
       }
