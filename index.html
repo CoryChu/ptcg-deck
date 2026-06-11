@@ -519,6 +519,17 @@
       && typeof require === 'function';
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
+    const DEBUG_LOG = '/Users/corychu/Desktop/Cory/Cursor/.cursor/debug-40b010.log';
+
+    function agentLog(location, message, data, hypothesisId, runId = 'post-fix') {
+      const payload = { sessionId: '40b010', location, message, data, timestamp: Date.now(), hypothesisId, runId };
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify(payload)}).catch(()=>{});
+      if (isElectron) {
+        try { require('fs').appendFileSync(DEBUG_LOG, `${JSON.stringify(payload)}\n`); } catch (_) { /* ignore */ }
+      }
+      // #endregion
+    }
 
     const CARDS_PER_PAGE = 8;
     const DECK_VERSION = 1;
@@ -644,9 +655,6 @@
 
     async function downloadPdfWithJsPdf(flatCards) {
       if (!window.jspdf?.jsPDF) {
-        // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdfWithJsPdf',message:'jsPDF not loaded',data:{hasJspdf:!!window.jspdf},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         throw new Error('jsPDF 未載入');
       }
 
@@ -673,36 +681,19 @@
         drawCropMarks(pdf, x, y, L.cardW, L.cardH);
       }
 
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdfWithJsPdf',message:'before pdf.save',data:{cardCount:flatCards.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
+      if (isElectron) {
+        const arrayBuffer = pdf.output('arraybuffer');
+        return ipcRenderer.invoke('save-pdf-buffer', arrayBuffer);
+      }
+
       pdf.save('ptcg-cards.pdf');
       return { ok: true, filePath: 'ptcg-cards.pdf' };
     }
 
     async function downloadPdf() {
       const flatCards = expandCards();
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdf',message:'downloadPdf start',data:{isElectron,cardCount:flatCards.length,jspdfLoaded:!!window.jspdf?.jsPDF},timestamp:Date.now(),hypothesisId:'A,C'})}).catch(()=>{});
-      // #endregion
       if (flatCards.length === 0) return { ok: false };
-
-      if (isElectron) {
-        const layout = buildPrintLayout(printRoot);
-        if (!layout || !layout.ok) return { ok: false };
-        await waitForImages(printRoot);
-        const result = await ipcRenderer.invoke('export-pdf');
-        // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdf',message:'electron export-pdf result',data:{result},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
-        return result;
-      }
-
-      const result = await downloadPdfWithJsPdf(flatCards);
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdf',message:'jspdf download done',data:{ok:result?.ok},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
-      return result;
+      return downloadPdfWithJsPdf(flatCards);
     }
 
     function updateUI() {
@@ -730,15 +721,24 @@
       updateUI();
     }
 
-    function addCard(file) {
-      const reader = new FileReader();
-      reader.onload = (e) => addCardFromSrc(file.name, e.target.result);
-      reader.readAsDataURL(file);
+    function addCardFromFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          addCardFromSrc(file.name, e.target.result);
+          resolve();
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
     }
 
     function handleFiles(fileList) {
-      const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/'));
-      imageFiles.forEach(addCard);
+      const imageFiles = dedupeImageFiles(
+        Array.from(fileList).filter((f) => f.type.startsWith('image/'))
+      );
+      if (imageFiles.length === 0) return;
+      addCardFromFile(pickBestImageFile(imageFiles));
     }
 
     function filenameFromUrl(url) {
@@ -782,11 +782,43 @@
       return score;
     }
 
+    function urlDedupeKey(url) {
+      try {
+        const u = new URL(url);
+        return `${u.origin}${u.pathname}`;
+      } catch {
+        return url;
+      }
+    }
+
     function pickBestImageUrls(urls, maxCount = 1) {
-      const candidates = [...new Set(urls)].filter((u) => isLikelyImageUrl(u));
-      if (candidates.length === 0) return [];
-      candidates.sort((a, b) => scoreImageUrl(b) - scoreImageUrl(a));
+      const byKey = new Map();
+      for (const url of urls) {
+        if (!isLikelyImageUrl(url)) continue;
+        const key = urlDedupeKey(url);
+        const existing = byKey.get(key);
+        if (!existing || scoreImageUrl(url) > scoreImageUrl(existing)) {
+          byKey.set(key, url);
+        }
+      }
+      const candidates = [...byKey.values()].sort((a, b) => scoreImageUrl(b) - scoreImageUrl(a));
       return candidates.slice(0, maxCount);
+    }
+
+    function dedupeImageFiles(files) {
+      const seen = new Set();
+      return files.filter((file) => {
+        if (!file?.type?.startsWith('image/')) return false;
+        const key = `${file.name}|${file.size}|${file.lastModified}|${file.type}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function pickBestImageFile(files) {
+      if (files.length === 0) return null;
+      return [...files].sort((a, b) => b.size - a.size)[0];
     }
 
     function resolveUrl(src) {
@@ -903,19 +935,17 @@
     function extractImageFiles(dt) {
       const files = [];
       if (dt.files?.length) {
-        Array.from(dt.files).forEach((f) => {
-          if (f.type.startsWith('image/')) files.push(f);
-        });
+        Array.from(dt.files).forEach((f) => files.push(f));
       }
       if (dt.items) {
         for (const item of dt.items) {
-          if (item.kind === 'file' && item.type.startsWith('image/')) {
+          if (item.kind === 'file') {
             const file = item.getAsFile();
             if (file) files.push(file);
           }
         }
       }
-      return files;
+      return dedupeImageFiles(files);
     }
 
     function blobToDataUrl(blob) {
@@ -997,30 +1027,60 @@
       });
     }
 
+    let dropLock = false;
+    let lastDropAt = 0;
+
     async function handleDrop(dataTransfer) {
-      const imageFiles = extractImageFiles(dataTransfer);
-      if (imageFiles.length > 0) {
-        imageFiles.forEach(addCard);
+      const now = Date.now();
+      if (dropLock || now - lastDropAt < 800) {
+        agentLog('index.html:handleDrop', 'skipped duplicate drop', { dropLock, msSinceLast: now - lastDropAt }, 'F', 'drop-fix');
         return;
       }
+      dropLock = true;
+      lastDropAt = now;
 
+      const imageFiles = extractImageFiles(dataTransfer);
       const allUrls = await extractImageUrlsAsync(dataTransfer);
-      const urls = pickBestImageUrls(allUrls, 1);
-      if (urls.length === 0) return;
+      const bestUrl = pickBestImageUrls(allUrls, 1)[0];
+      const bestFile = pickBestImageFile(imageFiles);
+
+      agentLog('index.html:handleDrop', 'drop parsed', {
+        rawFileCount: imageFiles.length,
+        urlCount: allUrls.length,
+        bestUrl: bestUrl ? urlDedupeKey(bestUrl) : null,
+        bestFileSize: bestFile?.size || 0,
+      }, 'A,B,C', 'drop-fix');
+
+      if (!bestFile && !bestUrl) {
+        dropLock = false;
+        return;
+      }
 
       deckStatus.textContent = '正在載入圖片…';
 
       try {
-        const dataUrl = await fetchImageAsDataUrl(urls[0]);
-        if (!(await validateImageDataUrl(dataUrl))) {
-          throw new Error('invalid image');
+        // 手機拖放常同時帶小縮圖檔與完整圖片網址；大於 10KB 的檔案才優先當作原圖
+        if (bestFile && bestFile.size >= 10000) {
+          await addCardFromFile(bestFile);
+          deckStatus.textContent = '已加入 1 張圖片';
+        } else if (bestUrl) {
+          const dataUrl = await fetchImageAsDataUrl(bestUrl);
+          if (!(await validateImageDataUrl(dataUrl))) {
+            throw new Error('invalid image');
+          }
+          addCardFromSrc(filenameFromUrl(bestUrl), dataUrl);
+          deckStatus.textContent = '已從網頁加入 1 張圖片';
+        } else if (bestFile) {
+          await addCardFromFile(bestFile);
+          deckStatus.textContent = '已加入 1 張圖片';
         }
-        addCardFromSrc(filenameFromUrl(urls[0]), dataUrl);
-        deckStatus.textContent = '已從網頁加入 1 張圖片';
+        agentLog('index.html:handleDrop', 'added one card', { cardsNow: cards.length }, 'A,B,C', 'drop-fix');
       } catch {
         deckStatus.textContent = '無法載入圖片（該網站封鎖外連，請先下載再拖入）';
+      } finally {
+        dropLock = false;
+        updateUI();
       }
-      updateUI();
     }
 
     dropZone.addEventListener('dragover', (e) => {
@@ -1034,11 +1094,14 @@
 
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       dropZone.classList.remove('drag-over');
+      lastDropAt = Date.now();
       handleDrop(e.dataTransfer);
     });
 
     dropZone.addEventListener('click', () => {
+      if (Date.now() - lastDropAt < 600) return;
       fileInputImages.click();
     });
 
@@ -1229,9 +1292,6 @@
     });
 
     btnPdf.addEventListener('click', async () => {
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:btnPdf',message:'btnPdf clicked',data:{isElectron,cardsInDeck:cards.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       const statusMsg = '正在產生 PDF…';
       deckStatus.textContent = statusMsg;
       previewInfo.textContent = statusMsg;
@@ -1251,9 +1311,6 @@
           previewInfo.textContent = failMsg;
         }
       } catch (err) {
-        // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:btnPdf',message:'PDF catch',data:{err:err?.message},timestamp:Date.now(),hypothesisId:'B,E'})}).catch(()=>{});
-        // #endregion
         const errMsg = `PDF 失敗：${err?.message || '未知錯誤'}`;
         deckStatus.textContent = errMsg;
         previewInfo.textContent = errMsg;

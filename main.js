@@ -123,8 +123,7 @@ ipcMain.handle('fetch-image-url', async (_event, url, referer) => {
   }
 });
 
-ipcMain.handle('export-pdf', async (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
+ipcMain.handle('save-pdf-buffer', async (_event, arrayBuffer) => {
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: '匯出 PDF',
     defaultPath: 'ptcg-cards.pdf',
@@ -132,14 +131,7 @@ ipcMain.handle('export-pdf', async (event) => {
   });
   if (canceled || !filePath) return { ok: false };
 
-  const pdfBuffer = await win.webContents.printToPDF({
-    printBackground: true,
-    landscape: true,
-    pageSize: 'A4',
-    margins: { marginType: 'none' },
-  });
-
-  fs.writeFileSync(filePath, pdfBuffer);
+  fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
   return { ok: true, filePath };
 });
 
