@@ -90,6 +90,15 @@
       gap: 0.5rem;
     }
 
+    .header-actions-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .btn-text-short { display: none; }
+
     .btn {
       padding: 0.55rem 1rem;
       font-size: 0.9rem;
@@ -649,15 +658,44 @@
       }
 
       .header-actions {
-        flex-wrap: wrap;
-        justify-content: center;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.35rem;
       }
+
+      .header-actions-bar {
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        gap: 0.3rem;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+      }
+
+      .header-actions-bar::-webkit-scrollbar { display: none; }
+
+      .header-actions-bar .btn {
+        flex-shrink: 0;
+        padding: 0.42rem 0.5rem;
+        font-size: 0.72rem;
+        min-height: 38px;
+        white-space: nowrap;
+      }
+
+      .header-actions-bar .btn-text-full { display: none; }
+      .header-actions-bar .btn-text-short { display: inline; }
 
       .deck-status {
         width: 100%;
         text-align: center;
         margin-right: 0;
         max-width: none;
+        font-size: 0.72rem;
+        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .btn {
@@ -759,11 +797,23 @@
     </div>
     <div class="header-actions">
       <span id="deckStatus" class="deck-status"></span>
-      <button id="btnPreview" class="btn btn-secondary" disabled>預覽</button>
-      <button id="btnSaveDeck" class="btn btn-secondary" disabled>Save Deck</button>
-      <button id="btnOpenDeck" class="btn btn-secondary">Open Deck</button>
-      <button id="btnImportDeck" class="btn btn-secondary" type="button">匯入 Deck</button>
-      <button id="btnClear" class="btn btn-danger" disabled>Clear</button>
+      <div class="header-actions-bar">
+        <button id="btnPreview" class="btn btn-secondary" disabled>
+          <span class="btn-text-full">預覽</span><span class="btn-text-short">預覽</span>
+        </button>
+        <button id="btnSaveDeck" class="btn btn-secondary" disabled>
+          <span class="btn-text-full">Save Deck</span><span class="btn-text-short">儲存</span>
+        </button>
+        <button id="btnOpenDeck" class="btn btn-secondary">
+          <span class="btn-text-full">Open Deck</span><span class="btn-text-short">開啟</span>
+        </button>
+        <button id="btnImportDeck" class="btn btn-secondary" type="button">
+          <span class="btn-text-full">匯入 Deck</span><span class="btn-text-short">匯入</span>
+        </button>
+        <button id="btnClear" class="btn btn-danger" disabled>
+          <span class="btn-text-full">Clear</span><span class="btn-text-short">清空</span>
+        </button>
+      </div>
     </div>
   </header>
 
