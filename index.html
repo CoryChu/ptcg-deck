@@ -57,6 +57,11 @@
     .header-brand {
       display: flex;
       align-items: flex-end;
+    }
+
+    .header-brand-core {
+      display: flex;
+      align-items: flex-end;
       gap: 0.45rem;
     }
 
@@ -472,7 +477,11 @@
       .header-brand {
         width: 100%;
         justify-content: center;
-        align-items: flex-end;
+      }
+
+      .header-brand-core {
+        position: relative;
+        display: block;
       }
 
       .app-logo {
@@ -481,8 +490,12 @@
       }
 
       .app-version {
+        position: absolute;
+        left: 100%;
+        bottom: 0.3rem;
+        margin-left: 0.35rem;
         font-size: 0.62rem;
-        padding-bottom: 0.3rem;
+        padding-bottom: 0;
       }
 
       .header-actions {
@@ -589,8 +602,10 @@
 <body>
   <header class="app-header">
     <div class="header-brand">
-      <img class="app-logo" src="assets/logo.png" alt="Pokémon Trading Card Game">
-      <span class="app-version" id="appVersion">v1.0</span>
+      <div class="header-brand-core">
+        <img class="app-logo" src="assets/logo.png" alt="Pokémon Trading Card Game">
+        <span class="app-version" id="appVersion">v1.0</span>
+      </div>
     </div>
     <div class="header-actions">
       <span id="deckStatus" class="deck-status"></span>
