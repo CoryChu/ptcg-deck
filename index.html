@@ -442,27 +442,32 @@
     }
 
     @media (min-width: 901px) {
+      .card-pick-overlay {
+        padding: 1.25rem;
+      }
+
       .card-pick-dialog {
-        width: min(1000px, 96vw);
-        padding: 1.5rem 1.75rem;
+        width: min(1320px, 98vw);
+        max-height: min(94vh, 94dvh);
+        padding: 1.75rem 2rem;
       }
 
       .card-pick-dialog h2 {
-        font-size: 1.2rem;
+        font-size: 1.3rem;
       }
 
       .card-pick-hint {
-        font-size: 0.9rem;
+        font-size: 0.95rem;
       }
 
       .card-pick-grid {
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-        gap: 1rem;
-        max-height: 68vh;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 1.15rem;
+        max-height: 76vh;
       }
 
       .card-pick-item {
-        padding: 0.55rem;
+        padding: 0.65rem;
         border-radius: 10px;
       }
 
@@ -471,7 +476,7 @@
       }
 
       .card-pick-label {
-        font-size: 0.78rem;
+        font-size: 0.82rem;
       }
     }
 
