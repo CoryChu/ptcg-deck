@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { searchPokemonCards } = require('./api/pokemon-search-lib');
 
 const appIconPath = path.join(__dirname, 'assets', 'icon.icns');
 
@@ -120,6 +121,14 @@ ipcMain.handle('fetch-image-url', async (_event, url, referer) => {
     };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('search-pokemon-cards', async (_event, keyword) => {
+  try {
+    return await searchPokemonCards(keyword);
+  } catch (err) {
+    return { ok: false, error: err.message, images: [] };
   }
 });
 

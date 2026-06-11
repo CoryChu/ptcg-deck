@@ -282,6 +282,67 @@
       text-align: center;
     }
 
+    .import-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 10500;
+      background: rgba(15, 23, 42, 0.88);
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .import-overlay.is-open { display: flex; }
+
+    .import-dialog {
+      width: min(520px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    }
+
+    .import-dialog h2 {
+      font-size: 1.1rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .import-hint {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+      line-height: 1.5;
+    }
+
+    #importText {
+      width: 100%;
+      min-height: 220px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.5;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .import-status {
+      min-height: 1.25rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin: 0.65rem 0 0.75rem;
+    }
+
+    .import-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+
     .btn-delete {
       padding: 0.25rem 0.5rem;
       font-size: 0.8rem;
@@ -612,6 +673,7 @@
       <button id="btnPreview" class="btn btn-secondary" disabled>預覽</button>
       <button id="btnSaveDeck" class="btn btn-secondary" disabled>Save Deck</button>
       <button id="btnOpenDeck" class="btn btn-secondary">Open Deck</button>
+      <button id="btnImportDeck" class="btn btn-secondary" type="button">匯入 Deck</button>
       <button id="btnClear" class="btn btn-danger" disabled>Clear</button>
     </div>
   </header>
@@ -633,6 +695,19 @@
   <div id="print-root"></div>
 
   <script src="assets/jspdf.umd.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js'"></script>
+
+  <div id="importOverlay" class="import-overlay" role="dialog" aria-modal="true" aria-label="匯入 Deck">
+    <div class="import-dialog">
+      <h2>匯入 Deck（文字）</h2>
+      <p class="import-hint">每行一張卡，例如：<code>超級雪妖女ex 3張</code>。程式會到寶可夢卡牌網搜尋圖片；若有多個版本會全部載入，請手動刪除錯誤的卡牌。</p>
+      <textarea id="importText" placeholder="超級雪妖女ex 3張&#10;水晶燈火靈 4張&#10;燭光靈 4張"></textarea>
+      <p id="importStatus" class="import-status"></p>
+      <div class="import-actions">
+        <button id="btnCancelImport" class="btn btn-secondary" type="button">取消</button>
+        <button id="btnRunImport" class="btn btn-primary" type="button">開始匯入</button>
+      </div>
+    </div>
+  </div>
 
   <div id="imageLightbox" class="image-lightbox" role="dialog" aria-modal="true" aria-label="卡牌大圖預覽">
     <div class="image-lightbox-toolbar">
@@ -679,7 +754,13 @@
     const btnPdf = document.getElementById('btnPdf');
     const btnSaveDeck = document.getElementById('btnSaveDeck');
     const btnOpenDeck = document.getElementById('btnOpenDeck');
+    const btnImportDeck = document.getElementById('btnImportDeck');
     const btnClear = document.getElementById('btnClear');
+    const importOverlay = document.getElementById('importOverlay');
+    const importText = document.getElementById('importText');
+    const importStatus = document.getElementById('importStatus');
+    const btnCancelImport = document.getElementById('btnCancelImport');
+    const btnRunImport = document.getElementById('btnRunImport');
     const deckStatus = document.getElementById('deckStatus');
     document.getElementById('appVersion').textContent = `v${APP_VERSION}`;
     const printRoot = document.getElementById('print-root');
@@ -848,15 +929,130 @@
         : (hasCards ? '未儲存的牌組' : '');
     }
 
-    function addCardFromSrc(name, src) {
+    function addCardFromSrc(name, src, quantity = 1, options = {}) {
       cards.push({
         id: nextId++,
         name,
         src,
-        quantity: 1,
+        quantity: Math.max(0, Math.min(999, Number(quantity) || 1)),
       });
+      if (!options.skipRender) {
+        renderPreview();
+        updateUI();
+      }
+    }
+
+    function parseDeckLine(line) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return null;
+      const withZhang = trimmed.match(/^(.+?)\s+(\d+)\s*[张張]\s*$/);
+      if (withZhang) {
+        return {
+          name: withZhang[1].trim(),
+          quantity: Math.min(999, parseInt(withZhang[2], 10) || 1),
+        };
+      }
+      const withX = trimmed.match(/^(.+?)\s+[xX×]\s*(\d+)\s*$/);
+      if (withX) {
+        return {
+          name: withX[1].trim(),
+          quantity: Math.min(999, parseInt(withX[2], 10) || 1),
+        };
+      }
+      return { name: trimmed, quantity: 1 };
+    }
+
+    function parseDeckText(text) {
+      return text.split(/\r?\n/).map(parseDeckLine).filter(Boolean);
+    }
+
+    async function searchPokemonCardsApi(keyword) {
+      if (isElectron) {
+        return ipcRenderer.invoke('search-pokemon-cards', keyword);
+      }
+      const res = await fetch(`/api/search-cards?keyword=${encodeURIComponent(keyword)}`);
+      return res.json();
+    }
+
+    function openImportDialog() {
+      importStatus.textContent = '';
+      importOverlay.classList.add('is-open');
+      importText.focus();
+    }
+
+    function closeImportDialog() {
+      importOverlay.classList.remove('is-open');
+      importStatus.textContent = '';
+    }
+
+    async function importDeckFromText(text) {
+      const entries = parseDeckText(text);
+      if (entries.length === 0) {
+        return { ok: false, error: '沒有可解析的卡牌行' };
+      }
+
+      const summary = { added: 0, failed: [], multi: [] };
+      currentDeckPath = null;
+      btnRunImport.disabled = true;
+
+      for (let i = 0; i < entries.length; i++) {
+        const { name, quantity } = entries[i];
+        const progress = `搜尋中 (${i + 1}/${entries.length})：${name}…`;
+        importStatus.textContent = progress;
+        deckStatus.textContent = progress;
+
+        let searchResult;
+        try {
+          searchResult = await searchPokemonCardsApi(name);
+        } catch {
+          summary.failed.push(`${name}（搜尋失敗）`);
+          continue;
+        }
+
+        if (!searchResult.ok || searchResult.images.length === 0) {
+          summary.failed.push(`${name}（找不到圖片）`);
+          continue;
+        }
+
+        const urls = searchResult.images;
+        if (urls.length > 1) summary.multi.push({ name, count: urls.length });
+
+        if (urls.length === 1) {
+          try {
+            const dataUrl = await fetchImageAsDataUrl(urls[0]);
+            if (!(await validateImageDataUrl(dataUrl))) throw new Error('invalid');
+            addCardFromSrc(`${name}.png`, dataUrl, quantity, { skipRender: true });
+            summary.added += 1;
+          } catch {
+            summary.failed.push(`${name}（圖片下載失敗）`);
+          }
+        } else {
+          for (const url of urls) {
+            try {
+              const dataUrl = await fetchImageAsDataUrl(url);
+              if (!(await validateImageDataUrl(dataUrl))) continue;
+              const file = url.split('/').pop();
+              addCardFromSrc(`${name}-${file}`, dataUrl, 1, { skipRender: true });
+              summary.added += 1;
+            } catch {
+              // 略過單張失敗
+            }
+          }
+        }
+      }
+
       renderPreview();
       updateUI();
+      btnRunImport.disabled = false;
+
+      let message = `已匯入 ${summary.added} 張卡牌`;
+      if (summary.multi.length > 0) {
+        message += `；${summary.multi.length} 種有多個版本（請刪除多餘卡牌）`;
+      }
+      if (summary.failed.length > 0) {
+        message += `；失敗：${summary.failed.join('、')}`;
+      }
+      return { ok: true, message, summary };
     }
 
     function addCardFromFile(file) {
@@ -1454,6 +1650,10 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (importOverlay.classList.contains('is-open')) {
+        closeImportDialog();
+        return;
+      }
       if (imageLightbox.classList.contains('is-open')) {
         closeImageLightbox();
         return;
@@ -1503,6 +1703,34 @@
       if (result.ok) {
         currentDeckPath = result.filePath;
         updateUI();
+      }
+    });
+
+    btnImportDeck.addEventListener('click', openImportDialog);
+
+    btnCancelImport.addEventListener('click', closeImportDialog);
+
+    importOverlay.addEventListener('click', (e) => {
+      if (e.target === importOverlay) closeImportDialog();
+    });
+
+    btnRunImport.addEventListener('click', async () => {
+      const text = importText.value;
+      if (!text.trim()) {
+        importStatus.textContent = '請貼上牌組文字';
+        return;
+      }
+      importStatus.textContent = '準備匯入…';
+      try {
+        const result = await importDeckFromText(text);
+        if (result.ok) {
+          importStatus.textContent = result.message;
+          deckStatus.textContent = result.message;
+        } else {
+          importStatus.textContent = result.error || '匯入失敗';
+        }
+      } catch (err) {
+        importStatus.textContent = `匯入失敗：${err.message}`;
       }
     });
 
