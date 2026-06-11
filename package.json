@@ -6,7 +6,10 @@
   "scripts": {
     "start": "electron .",
     "web": "npx --yes serve . -l 3000",
-    "deploy": "npx vercel --prod"
+    "deploy": "npx vercel --prod",
+    "deploy:watch": "bash scripts/deploy-watch.sh",
+    "sync": "bash scripts/git-push-if-changed.sh",
+    "release": "npm run sync && npm run deploy"
   },
   "devDependencies": {
     "electron": "^42.4.0",
