@@ -1,0 +1,14 @@
+{
+  "name": "ptcg-deck",
+  "version": "1.0.0",
+  "description": "PTCG Deck — 卡牌牌組管理與雷射列印排版",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "web": "npx --yes serve . -l 3000",
+    "deploy": "npx vercel --prod"
+  },
+  "devDependencies": {
+    "electron": "^42.4.0"
+  }
+}

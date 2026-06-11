@@ -1,0 +1,39 @@
+#!/bin/bash
+# macOS .app 啟動器 — 不顯示終端機視窗
+
+APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+PROJECT_DIR="$(dirname "$APP_DIR")"
+LOG_FILE="/tmp/ptcg-deck.log"
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  # shellcheck source=/dev/null
+  source "$HOME/.nvm/nvm.sh"
+fi
+
+cd "$PROJECT_DIR" || exit 1
+
+notify() {
+  osascript -e "display notification \"$1\" with title \"PTCG Deck\"" 2>/dev/null
+}
+
+alert() {
+  osascript -e "display alert \"PTCG Deck\" message \"$1\" as critical" 2>/dev/null
+}
+
+if [ ! -d "node_modules/electron" ]; then
+  notify "首次啟動，正在安裝相依套件..."
+  if ! npm install >> "$LOG_FILE" 2>&1; then
+    alert "安裝失敗。請確認已安裝 Node.js（https://nodejs.org）"
+    exit 1
+  fi
+fi
+
+ELECTRON_BIN="$PROJECT_DIR/node_modules/.bin/electron"
+if [ ! -x "$ELECTRON_BIN" ]; then
+  alert "找不到 Electron，請在終端機執行：cd \"$PROJECT_DIR\" && npm install"
+  exit 1
+fi
+
+nohup "$ELECTRON_BIN" "$PROJECT_DIR" >> "$LOG_FILE" 2>&1 &
+exit 0
