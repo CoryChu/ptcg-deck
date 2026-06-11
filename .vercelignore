@@ -1,0 +1,8 @@
+node_modules
+PTCG Deck.app
+main.js
+package.json
+package-lock.json
+.github
+DEPLOY.md
+.cursor

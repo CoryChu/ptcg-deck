@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="PTCG Deck">
+  <link rel="apple-touch-icon" href="assets/logo.png">
+  <link rel="manifest" href="manifest.json">
+  <title>PTCG Deck</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --danger: #ef4444;
+      --card-w: 63mm;
+      --card-h: 88mm;
+      --page-w: 297mm;
+      --page-h: 210mm;
+      --grid-offset-top: 12mm;
+      --grid-offset-left: 12mm;
+      --col-gap: 8mm;
+      --row-gap: 10mm;
+      --crop-color: #a1a1aa;
+      --crop-offset: 2mm;
+      --crop-length: 4mm;
+      --crop-thickness: 0.2mm;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Screen UI ── */
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .app-logo {
+      height: 72px;
+      width: auto;
+      max-width: 320px;
+      display: block;
+      object-fit: contain;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn {
+      padding: 0.55rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      color: #fff;
+      background: var(--accent);
+    }
+
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+    .btn-secondary {
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover:not(:disabled) { border-color: var(--accent); }
+
+    .btn-danger {
+      color: var(--danger);
+      background: transparent;
+      border: 1px solid var(--danger);
+    }
+
+    .btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.15); }
+
+    .deck-status {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-right: 0.5rem;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .drop-zone {
+      margin: 1.5rem;
+      padding: 3rem 2rem;
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      text-align: center;
+      color: var(--muted);
+      transition: border-color 0.2s, background 0.2s;
+      flex-shrink: 0;
+    }
+
+    .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(59, 130, 246, 0.08);
+      color: var(--text);
+    }
+
+    .drop-zone p { font-size: 1rem; margin-top: 0.5rem; }
+    .drop-zone { cursor: pointer; }
+
+    .hidden-input { display: none; }
+
+    .preview-section {
+      flex: 1;
+      padding: 0 1.5rem 1.5rem;
+      overflow-y: auto;
+    }
+
+    .preview-section h2 {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+
+    .preview-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .preview-card img {
+      width: 100%;
+      aspect-ratio: 63 / 88;
+      object-fit: cover;
+      display: block;
+      background: #000;
+    }
+
+    .preview-card-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      gap: 0.5rem;
+    }
+
+    .qty-group {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .qty-group button {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    .qty-group button:hover { border-color: var(--accent); }
+
+    .qty-group input {
+      width: 44px;
+      text-align: center;
+      padding: 0.25rem;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+
+    .btn-delete {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.8rem;
+      color: var(--danger);
+      background: transparent;
+      border: 1px solid var(--danger);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .btn-delete:hover { background: rgba(239, 68, 68, 0.15); }
+
+    .empty-hint {
+      color: var(--muted);
+      font-size: 0.9rem;
+      padding: 1rem 0;
+    }
+
+    /* ── Print layout (hidden on screen) ── */
+    #print-root { display: none; }
+
+    /* 列印與預覽共用 A4 橫向排版 */
+    #print-root .print-page,
+    .preview-pages .print-page {
+      position: relative;
+      width: var(--page-w);
+      height: var(--page-h);
+      box-sizing: border-box;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    #print-root .grid-container,
+    .preview-pages .grid-container {
+      position: absolute;
+      top: var(--grid-offset-top);
+      left: var(--grid-offset-left);
+      display: grid;
+      grid-template-columns: repeat(4, 63mm);
+      grid-template-rows: repeat(2, 88mm);
+      column-gap: var(--col-gap);
+      row-gap: var(--row-gap);
+    }
+
+    #print-root .print-card,
+    .preview-pages .print-card {
+      position: relative;
+      width: var(--card-w);
+      height: var(--card-h);
+      overflow: visible;
+    }
+
+    #print-root .print-card img,
+    .preview-pages .print-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    #print-root .print-card .mark,
+    .preview-pages .print-card .mark {
+      position: absolute;
+      background: var(--crop-color);
+      pointer-events: none;
+    }
+
+    #print-root .print-card .mark-tl-h,
+    .preview-pages .print-card .mark-tl-h {
+      top: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      left: calc(-1 * var(--crop-offset) - var(--crop-length));
+      width: var(--crop-length);
+      height: var(--crop-thickness);
+    }
+    #print-root .print-card .mark-tl-v,
+    .preview-pages .print-card .mark-tl-v {
+      top: calc(-1 * var(--crop-offset) - var(--crop-length));
+      left: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      width: var(--crop-thickness);
+      height: var(--crop-length);
+    }
+    #print-root .print-card .mark-tr-h,
+    .preview-pages .print-card .mark-tr-h {
+      top: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      right: calc(-1 * var(--crop-offset) - var(--crop-length));
+      width: var(--crop-length);
+      height: var(--crop-thickness);
+    }
+    #print-root .print-card .mark-tr-v,
+    .preview-pages .print-card .mark-tr-v {
+      top: calc(-1 * var(--crop-offset) - var(--crop-length));
+      right: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      width: var(--crop-thickness);
+      height: var(--crop-length);
+    }
+    #print-root .print-card .mark-bl-h,
+    .preview-pages .print-card .mark-bl-h {
+      bottom: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      left: calc(-1 * var(--crop-offset) - var(--crop-length));
+      width: var(--crop-length);
+      height: var(--crop-thickness);
+    }
+    #print-root .print-card .mark-bl-v,
+    .preview-pages .print-card .mark-bl-v {
+      bottom: calc(-1 * var(--crop-offset) - var(--crop-length));
+      left: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      width: var(--crop-thickness);
+      height: var(--crop-length);
+    }
+    #print-root .print-card .mark-br-h,
+    .preview-pages .print-card .mark-br-h {
+      bottom: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      right: calc(-1 * var(--crop-offset) - var(--crop-length));
+      width: var(--crop-length);
+      height: var(--crop-thickness);
+    }
+    #print-root .print-card .mark-br-v,
+    .preview-pages .print-card .mark-br-v {
+      bottom: calc(-1 * var(--crop-offset) - var(--crop-length));
+      right: calc(-1 * var(--crop-offset) - var(--crop-thickness));
+      width: var(--crop-thickness);
+      height: var(--crop-length);
+    }
+
+    /* ── 排版預覽視窗 ── */
+    .preview-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.96);
+      flex-direction: column;
+    }
+
+    .preview-overlay.is-open { display: flex; }
+
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1.25rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .preview-toolbar span {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .preview-toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .preview-scroll {
+      flex: 1;
+      overflow: auto;
+      padding: 1.5rem;
+    }
+
+    .preview-pages {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2rem;
+      margin: 0 auto;
+      transform: scale(0.55);
+      transform-origin: top center;
+      padding-bottom: 2rem;
+    }
+
+    .preview-pages .print-page {
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+
+    @media (max-width: 900px) {
+      .app-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+      }
+
+      .app-logo {
+        height: 52px;
+        margin: 0 auto;
+      }
+
+      .header-actions {
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .deck-status {
+        width: 100%;
+        text-align: center;
+        margin-right: 0;
+        max-width: none;
+      }
+
+      .btn {
+        padding: 0.65rem 0.85rem;
+        font-size: 0.85rem;
+        min-height: 44px;
+      }
+
+      .drop-zone {
+        margin: 1rem;
+        padding: 2rem 1rem;
+      }
+
+      .preview-section { padding: 0 1rem 1rem; }
+
+      .preview-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+      }
+
+      .preview-pages { transform: scale(0.32); }
+    }
+
+    @media print {
+      body > *:not(#print-root) { display: none !important; }
+      #print-root { display: block !important; }
+
+      @page {
+        size: A4 landscape;
+        margin: 0;
+      }
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      #print-root .print-page {
+        page-break-after: always;
+      }
+
+      #print-root .print-page:last-child {
+        page-break-after: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <img class="app-logo" src="assets/logo.png" alt="Pokémon Trading Card Game">
+    <div class="header-actions">
+      <span id="deckStatus" class="deck-status"></span>
+      <button id="btnPreview" class="btn btn-secondary" disabled>預覽</button>
+      <button id="btnSaveDeck" class="btn btn-secondary" disabled>Save Deck</button>
+      <button id="btnOpenDeck" class="btn btn-secondary">Open Deck</button>
+      <button id="btnClear" class="btn btn-danger" disabled>Clear</button>
+    </div>
+  </header>
+
+  <input type="file" id="fileInputImages" class="hidden-input" accept="image/*" multiple>
+  <input type="file" id="fileInputDeck" class="hidden-input" accept=".ptcgdeck,.json,application/json">
+
+  <div id="dropZone" class="drop-zone">
+    <strong>拖放或點擊選擇卡牌圖片</strong>
+    <p>支援 PNG、JPG、WEBP</p>
+  </div>
+
+  <section class="preview-section">
+    <h2>卡牌清單</h2>
+    <div id="previewGrid" class="preview-grid"></div>
+    <p id="emptyHint" class="empty-hint">尚未加入任何卡牌</p>
+  </section>
+
+  <div id="print-root"></div>
+
+  <div id="previewOverlay" class="preview-overlay">
+    <div class="preview-toolbar">
+      <span id="previewInfo">排版預覽</span>
+      <div class="preview-toolbar-actions">
+        <button id="btnClosePreview" class="btn btn-secondary" type="button">關閉</button>
+        <button id="btnPrint" class="btn btn-primary" type="button">列印</button>
+        <button id="btnPdf" class="btn btn-primary" type="button">PDF</button>
+      </div>
+    </div>
+    <div class="preview-scroll">
+      <div id="previewRoot" class="preview-pages"></div>
+    </div>
+  </div>
+
+  <script>
+    const isElectron = typeof window !== 'undefined'
+      && typeof window.process === 'object'
+      && window.process?.type === 'renderer'
+      && typeof require === 'function';
+
+    const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
+
+    const CARDS_PER_PAGE = 8;
+    const DECK_VERSION = 1;
+    const cards = [];
+    let nextId = 1;
+    let currentDeckPath = null;
+
+    const dropZone = document.getElementById('dropZone');
+    const previewGrid = document.getElementById('previewGrid');
+    const emptyHint = document.getElementById('emptyHint');
+    const btnPreview = document.getElementById('btnPreview');
+    const btnPrint = document.getElementById('btnPrint');
+    const btnPdf = document.getElementById('btnPdf');
+    const btnSaveDeck = document.getElementById('btnSaveDeck');
+    const btnOpenDeck = document.getElementById('btnOpenDeck');
+    const btnClear = document.getElementById('btnClear');
+    const deckStatus = document.getElementById('deckStatus');
+    const printRoot = document.getElementById('print-root');
+    const previewOverlay = document.getElementById('previewOverlay');
+    const previewRoot = document.getElementById('previewRoot');
+    const previewInfo = document.getElementById('previewInfo');
+    const btnClosePreview = document.getElementById('btnClosePreview');
+    const fileInputImages = document.getElementById('fileInputImages');
+    const fileInputDeck = document.getElementById('fileInputDeck');
+
+    function downloadFile(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function saveDeckFile(deckData) {
+      if (isElectron) {
+        return ipcRenderer.invoke('save-deck', deckData);
+      }
+      const name = currentDeckPath || 'my-deck.ptcgdeck';
+      const filename = name.includes('.') ? name.split('/').pop() : name;
+      downloadFile(filename, JSON.stringify(deckData, null, 2), 'application/json');
+      return { ok: true, filePath: filename };
+    }
+
+    async function openDeckFile() {
+      if (isElectron) {
+        return ipcRenderer.invoke('open-deck');
+      }
+      return new Promise((resolve) => {
+        fileInputDeck.onchange = () => {
+          const file = fileInputDeck.files[0];
+          fileInputDeck.value = '';
+          if (!file) {
+            resolve({ ok: false });
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const deckData = JSON.parse(e.target.result);
+              resolve({ ok: true, filePath: file.name, deckData });
+            } catch {
+              resolve({ ok: false, error: '無效的牌組檔案' });
+            }
+          };
+          reader.onerror = () => resolve({ ok: false });
+          reader.readAsText(file);
+        };
+        fileInputDeck.click();
+      });
+    }
+
+    async function exportPdf() {
+      if (isElectron) {
+        return ipcRenderer.invoke('export-pdf');
+      }
+      await waitForImages(printRoot);
+      window.print();
+      return { ok: true, filePath: '（請在列印對話框選擇「儲存為 PDF」）' };
+    }
+
+    function updateUI() {
+      const hasCards = cards.length > 0;
+      const totalQty = cards.reduce((sum, c) => sum + c.quantity, 0);
+      const canOutput = hasCards && totalQty > 0;
+      btnPreview.disabled = !canOutput;
+      btnSaveDeck.disabled = !hasCards;
+      btnClear.disabled = !hasCards;
+      emptyHint.style.display = hasCards ? 'none' : 'block';
+      previewGrid.style.display = hasCards ? 'grid' : 'none';
+      deckStatus.textContent = currentDeckPath
+        ? currentDeckPath.split('/').pop()
+        : (hasCards ? '未儲存的牌組' : '');
+    }
+
+    function addCard(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        cards.push({
+          id: nextId++,
+          name: file.name,
+          src: e.target.result,
+          quantity: 1,
+        });
+        renderPreview();
+        updateUI();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function handleFiles(fileList) {
+      const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+      imageFiles.forEach(addCard);
+    }
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('drag-over');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      handleFiles(e.dataTransfer.files);
+    });
+
+    dropZone.addEventListener('click', () => {
+      fileInputImages.click();
+    });
+
+    fileInputImages.addEventListener('change', () => {
+      if (fileInputImages.files.length > 0) {
+        handleFiles(fileInputImages.files);
+      }
+      fileInputImages.value = '';
+    });
+
+    function renderPreview() {
+      previewGrid.innerHTML = cards.map(card => `
+        <div class="preview-card" data-id="${card.id}">
+          <img src="${card.src}" alt="${card.name}">
+          <div class="preview-card-controls">
+            <div class="qty-group">
+              <button type="button" data-action="dec" data-id="${card.id}">−</button>
+              <input type="number" min="0" max="999" value="${card.quantity}" data-id="${card.id}">
+              <button type="button" data-action="inc" data-id="${card.id}">+</button>
+            </div>
+            <button type="button" class="btn-delete" data-action="del" data-id="${card.id}">刪除</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    previewGrid.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const id = Number(btn.dataset.id);
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+
+      if (btn.dataset.action === 'inc') {
+        card.quantity = Math.min(999, card.quantity + 1);
+      } else if (btn.dataset.action === 'dec') {
+        card.quantity = Math.max(0, card.quantity - 1);
+      } else if (btn.dataset.action === 'del') {
+        const idx = cards.indexOf(card);
+        cards.splice(idx, 1);
+      }
+      renderPreview();
+      updateUI();
+    });
+
+    previewGrid.addEventListener('change', (e) => {
+      if (e.target.tagName !== 'INPUT') return;
+      const id = Number(e.target.dataset.id);
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+      const val = parseInt(e.target.value, 10);
+      card.quantity = isNaN(val) ? 0 : Math.max(0, Math.min(999, val));
+      e.target.value = card.quantity;
+      updateUI();
+    });
+
+    function expandCards() {
+      const expanded = [];
+      for (const card of cards) {
+        for (let i = 0; i < card.quantity; i++) {
+          expanded.push(card);
+        }
+      }
+      return expanded;
+    }
+
+    function createCardElement(card) {
+      const el = document.createElement('div');
+      el.className = 'print-card';
+      el.innerHTML = `
+        <span class="mark mark-tl-h"></span>
+        <span class="mark mark-tl-v"></span>
+        <span class="mark mark-tr-h"></span>
+        <span class="mark mark-tr-v"></span>
+        <span class="mark mark-bl-h"></span>
+        <span class="mark mark-bl-v"></span>
+        <span class="mark mark-br-h"></span>
+        <span class="mark mark-br-v"></span>
+        <img src="${card.src}" alt="">
+      `;
+      return el;
+    }
+
+    function buildPrintLayout(target = printRoot) {
+      const flatCards = expandCards();
+      if (flatCards.length === 0) return false;
+
+      target.innerHTML = '';
+      const pageCount = Math.ceil(flatCards.length / CARDS_PER_PAGE);
+
+      for (let p = 0; p < pageCount; p++) {
+        const page = document.createElement('div');
+        page.className = 'print-page';
+
+        const grid = document.createElement('div');
+        grid.className = 'grid-container';
+
+        const slice = flatCards.slice(p * CARDS_PER_PAGE, (p + 1) * CARDS_PER_PAGE);
+        slice.forEach(card => grid.appendChild(createCardElement(card)));
+
+        page.appendChild(grid);
+        target.appendChild(page);
+      }
+      return { ok: true, pageCount, cardCount: flatCards.length };
+    }
+
+    function closePreview() {
+      previewOverlay.classList.remove('is-open');
+      previewRoot.innerHTML = '';
+    }
+
+    async function openPreview() {
+      const result = buildPrintLayout(previewRoot);
+      if (!result) return;
+
+      await waitForImages(previewRoot);
+      previewInfo.textContent = `排版預覽 · 共 ${result.pageCount} 頁 · ${result.cardCount} 張卡牌`;
+      previewOverlay.classList.add('is-open');
+      document.querySelector('.preview-scroll').scrollTop = 0;
+    }
+
+    function waitForImages(root) {
+      const imgs = root.querySelectorAll('img');
+      return Promise.all(Array.from(imgs).map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise(resolve => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+      }));
+    }
+
+    function getDeckData() {
+      return {
+        version: DECK_VERSION,
+        savedAt: new Date().toISOString(),
+        cards: cards.map(({ name, src, quantity }) => ({ name, src, quantity })),
+      };
+    }
+
+    function clearDeck() {
+      cards.length = 0;
+      nextId = 1;
+      currentDeckPath = null;
+      previewGrid.innerHTML = '';
+      printRoot.innerHTML = '';
+      closePreview();
+      updateUI();
+    }
+
+    function loadDeckData(deckData) {
+      if (!deckData || !Array.isArray(deckData.cards)) {
+        throw new Error('無效的牌組檔案格式');
+      }
+      cards.length = 0;
+      nextId = 1;
+      for (const item of deckData.cards) {
+        if (!item.src) continue;
+        cards.push({
+          id: nextId++,
+          name: item.name || 'card',
+          src: item.src,
+          quantity: Math.max(0, Math.min(999, Number(item.quantity) || 1)),
+        });
+      }
+      renderPreview();
+      updateUI();
+    }
+
+    btnPreview.addEventListener('click', openPreview);
+
+    btnClosePreview.addEventListener('click', closePreview);
+
+    previewOverlay.addEventListener('click', (e) => {
+      if (e.target === previewOverlay) closePreview();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && previewOverlay.classList.contains('is-open')) {
+        closePreview();
+      }
+    });
+
+    btnPrint.addEventListener('click', async () => {
+      if (!buildPrintLayout(printRoot).ok) return;
+      await waitForImages(printRoot);
+      window.print();
+    });
+
+    btnPdf.addEventListener('click', async () => {
+      if (!buildPrintLayout(printRoot).ok) return;
+      const result = await exportPdf();
+      if (result.ok) {
+        const label = isElectron
+          ? result.filePath.split('/').pop()
+          : '請選擇「儲存為 PDF」';
+        deckStatus.textContent = `已匯出：${label}`;
+      }
+    });
+
+    btnSaveDeck.addEventListener('click', async () => {
+      const result = await saveDeckFile(getDeckData());
+      if (result.ok) {
+        currentDeckPath = result.filePath;
+        updateUI();
+      }
+    });
+
+    btnOpenDeck.addEventListener('click', async () => {
+      const result = await openDeckFile();
+      if (!result.ok) {
+        if (result.error) alert(result.error);
+        return;
+      }
+      try {
+        loadDeckData(result.deckData);
+        currentDeckPath = result.filePath;
+        updateUI();
+      } catch (err) {
+        alert('無法開啟牌組：' + err.message);
+      }
+    });
+
+    btnClear.addEventListener('click', () => {
+      if (cards.length === 0) return;
+      if (!confirm('確定要清空目前牌組？此動作無法復原。')) return;
+      clearDeck();
+    });
+
+    updateUI();
+  </script>
+</body>
+</html>
