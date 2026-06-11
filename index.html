@@ -496,6 +496,8 @@
 
   <div id="print-root"></div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+
   <div id="previewOverlay" class="preview-overlay">
     <div class="preview-toolbar">
       <span id="previewInfo">排版預覽</span>
@@ -590,13 +592,99 @@
       });
     }
 
-    async function exportPdf() {
+    const PDF_LAYOUT = {
+      pageW: 297,
+      pageH: 210,
+      marginL: 12,
+      marginT: 12,
+      cardW: 63,
+      cardH: 88,
+      colGap: 8,
+      rowGap: 10,
+      cols: 4,
+    };
+
+    function drawCropMarks(pdf, x, y, w, h) {
+      const offset = 2;
+      const len = 4;
+      pdf.setDrawColor(161, 161, 170);
+      pdf.setLineWidth(0.2);
+      pdf.line(x - offset - len, y - offset, x - offset, y - offset);
+      pdf.line(x - offset, y - offset - len, x - offset, y - offset);
+      pdf.line(x + w + offset, y - offset, x + w + offset + len, y - offset);
+      pdf.line(x + w + offset, y - offset - len, x + w + offset, y - offset);
+      pdf.line(x - offset - len, y + h + offset, x - offset, y + h + offset);
+      pdf.line(x - offset, y + h + offset, x - offset, y + h + offset + len);
+      pdf.line(x + w + offset, y + h + offset, x + w + offset + len, y + h + offset);
+      pdf.line(x + w + offset, y + h + offset, x + w + offset, y + h + offset + len);
+    }
+
+    function imageFormatForPdf(dataUrl) {
+      if (dataUrl.startsWith('data:image/png')) return 'PNG';
+      return 'JPEG';
+    }
+
+    function ensurePdfImageData(dataUrl) {
+      if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/png')) {
+        return Promise.resolve(dataUrl);
+      }
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg', 0.95));
+        };
+        img.onerror = () => reject(new Error('image convert failed'));
+        img.src = dataUrl;
+      });
+    }
+
+    async function downloadPdfWithJsPdf(flatCards) {
+      if (!window.jspdf?.jsPDF) {
+        throw new Error('jsPDF 未載入');
+      }
+
+      const { jsPDF } = window.jspdf;
+      const L = PDF_LAYOUT;
+      let pdf = null;
+
+      for (let i = 0; i < flatCards.length; i++) {
+        const slot = i % CARDS_PER_PAGE;
+
+        if (slot === 0) {
+          if (pdf) pdf.addPage([L.pageW, L.pageH], 'landscape');
+          else pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        }
+
+        const col = slot % L.cols;
+        const row = Math.floor(slot / L.cols);
+        const x = L.marginL + col * (L.cardW + L.colGap);
+        const y = L.marginT + row * (L.cardH + L.rowGap);
+
+        const imgData = await ensurePdfImageData(flatCards[i].src);
+        const format = imageFormatForPdf(imgData);
+        pdf.addImage(imgData, format, x, y, L.cardW, L.cardH);
+        drawCropMarks(pdf, x, y, L.cardW, L.cardH);
+      }
+
+      pdf.save('ptcg-cards.pdf');
+      return { ok: true, filePath: 'ptcg-cards.pdf' };
+    }
+
+    async function downloadPdf() {
+      const flatCards = expandCards();
+      if (flatCards.length === 0) return { ok: false };
+
       if (isElectron) {
+        if (!buildPrintLayout(printRoot).ok) return { ok: false };
+        await waitForImages(printRoot);
         return ipcRenderer.invoke('export-pdf');
       }
-      await waitForImages(printRoot);
-      window.print();
-      return { ok: true, filePath: '（請在列印對話框選擇「儲存為 PDF」）' };
+
+      return downloadPdfWithJsPdf(flatCards);
     }
 
     function updateUI() {
@@ -645,10 +733,42 @@
       }
     }
 
+    function isPageUrl(url) {
+      try {
+        const { pathname } = new URL(url);
+        const p = pathname.toLowerCase();
+        if (/\.(html?|php|asp|aspx|jsp)(\?|#|$)/i.test(p)) return true;
+        if (/\/(search|card-search|deck|products?)(\/|$)/i.test(p)) return true;
+        if (p.endsWith('/') && !/\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(p)) return true;
+      } catch {
+        return false;
+      }
+      return false;
+    }
+
     function isLikelyImageUrl(url) {
+      if (!url || url.startsWith('blob:')) return false;
       if (url.startsWith('data:image/')) return true;
-      if (/^https?:\/\//i.test(url)) return true;
-      return /\.(png|jpe?g|webp|gif|bmp|avif|svg)(\?|#|$)/i.test(url);
+      if (isPageUrl(url)) return false;
+      if (/\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(url)) return true;
+      if (/\/(images?|img|media|assets|uploads?|card-img|card_image|pokemon|tcg)/i.test(url)) return true;
+      return false;
+    }
+
+    function scoreImageUrl(url) {
+      let score = 0;
+      if (/\.(png|jpe?g|webp)(\?|#|$)/i.test(url)) score += 30;
+      if (/thumb|thumbnail|small|icon|logo|sprite|1x1|pixel|placeholder/i.test(url)) score -= 40;
+      if (/card|pokemon|tcg/i.test(url)) score += 10;
+      score += Math.min(url.length, 200) / 20;
+      return score;
+    }
+
+    function pickBestImageUrls(urls, maxCount = 1) {
+      const candidates = [...new Set(urls)].filter((u) => isLikelyImageUrl(u));
+      if (candidates.length === 0) return [];
+      candidates.sort((a, b) => scoreImageUrl(b) - scoreImageUrl(a));
+      return candidates.slice(0, maxCount);
     }
 
     function resolveUrl(src) {
@@ -670,22 +790,22 @@
       return candidates[0]?.url || null;
     }
 
-    function addUrlsFromImg(img, urls) {
-      const attrs = ['src', 'data-src', 'data-lazy-src', 'data-original', 'data-url'];
-      const list = [];
-      attrs.forEach((attr) => {
-        const val = img.getAttribute(attr);
-        if (val) list.push(val);
-      });
+    function bestUrlFromImg(img) {
       const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
       if (srcset) {
         const best = parseSrcset(srcset);
-        if (best) list.unshift(best);
+        if (best) return resolveUrl(best);
       }
-      list.forEach((src) => {
-        const resolved = resolveUrl(src);
-        if (resolved && isLikelyImageUrl(resolved)) urls.add(resolved);
-      });
+      for (const attr of ['data-src', 'data-original', 'data-lazy-src', 'src']) {
+        const val = img.getAttribute(attr);
+        if (val) return resolveUrl(val);
+      }
+      return null;
+    }
+
+    function addUrlsFromImg(img, urls) {
+      const best = bestUrlFromImg(img);
+      if (best && isLikelyImageUrl(best)) urls.add(best);
     }
 
     function parseHtmlForUrls(html, urls) {
@@ -848,6 +968,17 @@
       throw lastError || new Error('fetch failed');
     }
 
+    function validateImageDataUrl(dataUrl) {
+      if (!dataUrl?.startsWith('data:image/')) return Promise.resolve(false);
+      if (dataUrl.length < 2000) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img.naturalWidth >= 50 && img.naturalHeight >= 50);
+        img.onerror = () => resolve(false);
+        img.src = dataUrl;
+      });
+    }
+
     async function handleDrop(dataTransfer) {
       const imageFiles = extractImageFiles(dataTransfer);
       if (imageFiles.length > 0) {
@@ -855,27 +986,21 @@
         return;
       }
 
-      const urls = await extractImageUrlsAsync(dataTransfer);
+      const allUrls = await extractImageUrlsAsync(dataTransfer);
+      const urls = pickBestImageUrls(allUrls, 1);
       if (urls.length === 0) return;
 
-      deckStatus.textContent = `正在載入 ${urls.length} 張圖片…`;
-      let ok = 0;
-      let fail = 0;
+      deckStatus.textContent = '正在載入圖片…';
 
-      for (const url of urls) {
-        try {
-          const dataUrl = await fetchImageAsDataUrl(url);
-          addCardFromSrc(filenameFromUrl(url), dataUrl);
-          ok++;
-        } catch {
-          fail++;
+      try {
+        const dataUrl = await fetchImageAsDataUrl(urls[0]);
+        if (!(await validateImageDataUrl(dataUrl))) {
+          throw new Error('invalid image');
         }
-      }
-
-      if (fail > 0) {
-        deckStatus.textContent = `已加入 ${ok} 張，${fail} 張無法載入（該網站封鎖外連，請先下載再拖入）`;
-      } else if (ok > 0) {
-        deckStatus.textContent = `已從網頁加入 ${ok} 張圖片`;
+        addCardFromSrc(filenameFromUrl(urls[0]), dataUrl);
+        deckStatus.textContent = '已從網頁加入 1 張圖片';
+      } catch {
+        deckStatus.textContent = '無法載入圖片（該網站封鎖外連，請先下載再拖入）';
       }
       updateUI();
     }
@@ -1086,14 +1211,21 @@
     });
 
     btnPdf.addEventListener('click', async () => {
-      if (!buildPrintLayout(printRoot).ok) return;
-      const result = await exportPdf();
-      if (result.ok) {
-        const label = isElectron
-          ? result.filePath.split('/').pop()
-          : '請選擇「儲存為 PDF」';
-        deckStatus.textContent = `已匯出：${label}`;
+      deckStatus.textContent = '正在產生 PDF…';
+      try {
+        const result = await downloadPdf();
+        if (result?.ok) {
+          const label = isElectron
+            ? result.filePath.split('/').pop()
+            : 'ptcg-cards.pdf';
+          deckStatus.textContent = `已下載：${label}`;
+        } else {
+          deckStatus.textContent = 'PDF 產生失敗';
+        }
+      } catch {
+        deckStatus.textContent = 'PDF 產生失敗';
       }
+      updateUI();
     });
 
     btnSaveDeck.addEventListener('click', async () => {
