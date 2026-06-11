@@ -1884,8 +1884,8 @@
       try {
         const result = await importDeckFromText(text);
         if (result.ok) {
-          importStatus.textContent = result.message;
-          deckStatus.textContent = result.message;
+          closeImportDialog();
+          deckStatus.textContent = `匯入完成：${result.message}`;
         } else {
           importStatus.textContent = result.error || '匯入失敗';
         }
