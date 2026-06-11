@@ -441,6 +441,40 @@
       flex-wrap: wrap;
     }
 
+    @media (min-width: 901px) {
+      .card-pick-dialog {
+        width: min(1000px, 96vw);
+        padding: 1.5rem 1.75rem;
+      }
+
+      .card-pick-dialog h2 {
+        font-size: 1.2rem;
+      }
+
+      .card-pick-hint {
+        font-size: 0.9rem;
+      }
+
+      .card-pick-grid {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 1rem;
+        max-height: 68vh;
+      }
+
+      .card-pick-item {
+        padding: 0.55rem;
+        border-radius: 10px;
+      }
+
+      .card-pick-item img {
+        object-fit: contain;
+      }
+
+      .card-pick-label {
+        font-size: 0.78rem;
+      }
+    }
+
     .btn-delete {
       padding: 0.25rem 0.5rem;
       font-size: 0.8rem;
