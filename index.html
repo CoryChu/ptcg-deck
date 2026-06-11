@@ -487,21 +487,38 @@
         gap: 0.75rem;
       }
 
+      .preview-card-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.35rem;
+        padding: 0.4rem 0.5rem;
+      }
+
+      .qty-group {
+        justify-content: center;
+        gap: 0.2rem;
+      }
+
       .qty-group button {
-        width: 44px;
-        height: 44px;
-        font-size: 1.25rem;
+        width: 36px;
+        height: 36px;
+        font-size: 1.1rem;
       }
 
       .qty-group input {
-        width: 52px;
-        min-height: 44px;
+        width: 42px;
+        min-height: 36px;
+        padding: 0.15rem;
       }
 
       .btn-delete {
-        min-height: 44px;
-        padding: 0.4rem 0.65rem;
+        width: 100%;
+        min-height: 36px;
+        padding: 0.35rem 0.5rem;
+        font-size: 0.8rem;
+        text-align: center;
         touch-action: manipulation;
+        white-space: nowrap;
       }
 
       .preview-pages { transform: scale(0.32); }
