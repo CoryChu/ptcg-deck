@@ -485,7 +485,7 @@
 
   <div id="dropZone" class="drop-zone">
     <strong>拖放或點擊選擇卡牌圖片</strong>
-    <p>支援 PNG、JPG、WEBP</p>
+    <p>支援本機檔案，亦可直接從網頁拖入圖片</p>
   </div>
 
   <section class="preview-section">
@@ -613,24 +613,165 @@
         : (hasCards ? '未儲存的牌組' : '');
     }
 
+    function addCardFromSrc(name, src) {
+      cards.push({
+        id: nextId++,
+        name,
+        src,
+        quantity: 1,
+      });
+      renderPreview();
+      updateUI();
+    }
+
     function addCard(file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        cards.push({
-          id: nextId++,
-          name: file.name,
-          src: e.target.result,
-          quantity: 1,
-        });
-        renderPreview();
-        updateUI();
-      };
+      reader.onload = (e) => addCardFromSrc(file.name, e.target.result);
       reader.readAsDataURL(file);
     }
 
     function handleFiles(fileList) {
       const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/'));
       imageFiles.forEach(addCard);
+    }
+
+    function filenameFromUrl(url) {
+      try {
+        const pathname = new URL(url).pathname;
+        const base = pathname.split('/').pop();
+        return base && base.includes('.') ? base : 'web-image.png';
+      } catch {
+        return 'web-image.png';
+      }
+    }
+
+    function isLikelyImageUrl(url) {
+      if (url.startsWith('data:image/')) return true;
+      return /\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(url);
+    }
+
+    function resolveUrl(src) {
+      try {
+        return new URL(src, window.location.href).href;
+      } catch {
+        return src;
+      }
+    }
+
+    function extractImageUrlsFromDataTransfer(dt) {
+      const urls = new Set();
+
+      const html = dt.getData('text/html');
+      if (html) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        doc.querySelectorAll('img[src]').forEach((img) => {
+          const src = img.getAttribute('src');
+          if (src) urls.add(resolveUrl(src));
+        });
+      }
+
+      const uriList = dt.getData('text/uri-list') || dt.getData('text/plain') || '';
+      uriList.split('\n').forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        if (isLikelyImageUrl(trimmed) || trimmed.startsWith('http')) {
+          urls.add(resolveUrl(trimmed));
+        }
+      });
+
+      return [...urls];
+    }
+
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function imageUrlToDataUrlViaCanvas(url) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          try {
+            resolve(canvas.toDataURL('image/png'));
+          } catch (err) {
+            reject(err);
+          }
+        };
+        img.onerror = () => reject(new Error('canvas load failed'));
+        img.src = url;
+      });
+    }
+
+    async function fetchImageAsDataUrl(url) {
+      if (url.startsWith('data:image/')) return url;
+
+      if (isElectron) {
+        const result = await ipcRenderer.invoke('fetch-image-url', url);
+        if (!result.ok) throw new Error(result.error || 'fetch failed');
+        return result.dataUrl;
+      }
+
+      const proxyUrl = `/api/fetch-image?url=${encodeURIComponent(url)}`;
+      try {
+        const proxyRes = await fetch(proxyUrl);
+        if (proxyRes.ok) {
+          return blobToDataUrl(await proxyRes.blob());
+        }
+      } catch {
+        // try next method
+      }
+
+      try {
+        const directRes = await fetch(url, { mode: 'cors' });
+        if (directRes.ok) {
+          return blobToDataUrl(await directRes.blob());
+        }
+      } catch {
+        // try canvas
+      }
+
+      return imageUrlToDataUrlViaCanvas(url);
+    }
+
+    async function handleDrop(dataTransfer) {
+      const imageFiles = Array.from(dataTransfer.files).filter(f => f.type.startsWith('image/'));
+      if (imageFiles.length > 0) {
+        imageFiles.forEach(addCard);
+        return;
+      }
+
+      const urls = extractImageUrlsFromDataTransfer(dataTransfer);
+      if (urls.length === 0) return;
+
+      deckStatus.textContent = `正在載入 ${urls.length} 張圖片…`;
+      let ok = 0;
+      let fail = 0;
+
+      for (const url of urls) {
+        try {
+          const dataUrl = await fetchImageAsDataUrl(url);
+          addCardFromSrc(filenameFromUrl(url), dataUrl);
+          ok++;
+        } catch {
+          fail++;
+        }
+      }
+
+      if (fail > 0) {
+        deckStatus.textContent = `已加入 ${ok} 張，${fail} 張無法載入（網站可能封鎖）`;
+      } else if (ok > 0) {
+        deckStatus.textContent = `已從網頁加入 ${ok} 張圖片`;
+      }
+      updateUI();
     }
 
     dropZone.addEventListener('dragover', (e) => {
@@ -645,7 +786,7 @@
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('drag-over');
-      handleFiles(e.dataTransfer.files);
+      handleDrop(e.dataTransfer);
     });
 
     dropZone.addEventListener('click', () => {
