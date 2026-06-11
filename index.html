@@ -496,7 +496,7 @@
 
   <div id="print-root"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+  <script src="assets/jspdf.umd.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js'"></script>
 
   <div id="previewOverlay" class="preview-overlay">
     <div class="preview-toolbar">
@@ -644,6 +644,9 @@
 
     async function downloadPdfWithJsPdf(flatCards) {
       if (!window.jspdf?.jsPDF) {
+        // #region agent log
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdfWithJsPdf',message:'jsPDF not loaded',data:{hasJspdf:!!window.jspdf},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         throw new Error('jsPDF 未載入');
       }
 
@@ -670,21 +673,36 @@
         drawCropMarks(pdf, x, y, L.cardW, L.cardH);
       }
 
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdfWithJsPdf',message:'before pdf.save',data:{cardCount:flatCards.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
       pdf.save('ptcg-cards.pdf');
       return { ok: true, filePath: 'ptcg-cards.pdf' };
     }
 
     async function downloadPdf() {
       const flatCards = expandCards();
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdf',message:'downloadPdf start',data:{isElectron,cardCount:flatCards.length,jspdfLoaded:!!window.jspdf?.jsPDF},timestamp:Date.now(),hypothesisId:'A,C'})}).catch(()=>{});
+      // #endregion
       if (flatCards.length === 0) return { ok: false };
 
       if (isElectron) {
-        if (!buildPrintLayout(printRoot).ok) return { ok: false };
+        const layout = buildPrintLayout(printRoot);
+        if (!layout || !layout.ok) return { ok: false };
         await waitForImages(printRoot);
-        return ipcRenderer.invoke('export-pdf');
+        const result = await ipcRenderer.invoke('export-pdf');
+        // #region agent log
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdf',message:'electron export-pdf result',data:{result},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+        return result;
       }
 
-      return downloadPdfWithJsPdf(flatCards);
+      const result = await downloadPdfWithJsPdf(flatCards);
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:downloadPdf',message:'jspdf download done',data:{ok:result?.ok},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      return result;
     }
 
     function updateUI() {
@@ -1211,21 +1229,38 @@
     });
 
     btnPdf.addEventListener('click', async () => {
-      deckStatus.textContent = '正在產生 PDF…';
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:btnPdf',message:'btnPdf clicked',data:{isElectron,cardsInDeck:cards.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      const statusMsg = '正在產生 PDF…';
+      deckStatus.textContent = statusMsg;
+      previewInfo.textContent = statusMsg;
+      btnPdf.disabled = true;
       try {
         const result = await downloadPdf();
         if (result?.ok) {
           const label = isElectron
             ? result.filePath.split('/').pop()
             : 'ptcg-cards.pdf';
-          deckStatus.textContent = `已下載：${label}`;
+          const okMsg = `已下載：${label}`;
+          deckStatus.textContent = okMsg;
+          previewInfo.textContent = okMsg;
         } else {
-          deckStatus.textContent = 'PDF 產生失敗';
+          const failMsg = 'PDF 產生失敗（無卡牌或已取消）';
+          deckStatus.textContent = failMsg;
+          previewInfo.textContent = failMsg;
         }
-      } catch {
-        deckStatus.textContent = 'PDF 產生失敗';
+      } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:btnPdf',message:'PDF catch',data:{err:err?.message},timestamp:Date.now(),hypothesisId:'B,E'})}).catch(()=>{});
+        // #endregion
+        const errMsg = `PDF 失敗：${err?.message || '未知錯誤'}`;
+        deckStatus.textContent = errMsg;
+        previewInfo.textContent = errMsg;
+      } finally {
+        btnPdf.disabled = false;
+        updateUI();
       }
-      updateUI();
     });
 
     btnSaveDeck.addEventListener('click', async () => {
