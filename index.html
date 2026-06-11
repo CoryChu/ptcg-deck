@@ -343,6 +343,95 @@
       gap: 0.5rem;
     }
 
+    .card-pick-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 10600;
+      background: rgba(15, 23, 42, 0.92);
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .card-pick-overlay.is-open { display: flex; }
+
+    .card-pick-dialog {
+      width: min(640px, 100%);
+      max-height: min(90vh, 90dvh);
+      overflow: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    }
+
+    .card-pick-dialog h2 {
+      font-size: 1.05rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .card-pick-hint {
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .card-pick-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: 0.65rem;
+      margin: 1rem 0;
+      max-height: 52vh;
+      overflow-y: auto;
+      padding: 0.15rem;
+    }
+
+    .card-pick-item {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.3rem;
+      padding: 0.35rem;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .card-pick-item:hover,
+    .card-pick-item:focus-visible {
+      border-color: var(--accent);
+      outline: none;
+    }
+
+    .card-pick-item img {
+      width: 100%;
+      aspect-ratio: 63 / 88;
+      object-fit: cover;
+      border-radius: 4px;
+      background: #000;
+      display: block;
+    }
+
+    .card-pick-label {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-align: center;
+      word-break: break-all;
+      line-height: 1.2;
+    }
+
+    .card-pick-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
     .btn-delete {
       padding: 0.25rem 0.5rem;
       font-size: 0.8rem;
@@ -699,12 +788,24 @@
   <div id="importOverlay" class="import-overlay" role="dialog" aria-modal="true" aria-label="匯入 Deck">
     <div class="import-dialog">
       <h2>匯入 Deck（文字）</h2>
-      <p class="import-hint">每行一張卡，例如：<code>超級雪妖女ex 3張</code>。程式會到寶可夢卡牌網搜尋圖片；若有多個版本會全部載入，請手動刪除錯誤的卡牌。</p>
+      <p class="import-hint">每行一張卡，例如：<code>超級雪妖女ex 3張</code>。程式會到寶可夢卡牌網搜尋圖片；若有多個版本會顯示圖片供你選擇。</p>
       <textarea id="importText" placeholder="超級雪妖女ex 3張&#10;水晶燈火靈 4張&#10;燭光靈 4張"></textarea>
       <p id="importStatus" class="import-status"></p>
       <div class="import-actions">
         <button id="btnCancelImport" class="btn btn-secondary" type="button">取消</button>
         <button id="btnRunImport" class="btn btn-primary" type="button">開始匯入</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="cardPickOverlay" class="card-pick-overlay" role="dialog" aria-modal="true" aria-label="選擇卡牌">
+    <div class="card-pick-dialog">
+      <h2 id="cardPickTitle">選擇卡牌</h2>
+      <p id="cardPickHint" class="card-pick-hint"></p>
+      <div id="cardPickGrid" class="card-pick-grid"></div>
+      <div class="card-pick-actions">
+        <button id="btnSkipPick" class="btn btn-secondary" type="button">跳過此卡</button>
+        <button id="btnCancelPick" class="btn btn-danger" type="button">取消匯入</button>
       </div>
     </div>
   </div>
@@ -761,6 +862,14 @@
     const importStatus = document.getElementById('importStatus');
     const btnCancelImport = document.getElementById('btnCancelImport');
     const btnRunImport = document.getElementById('btnRunImport');
+    const cardPickOverlay = document.getElementById('cardPickOverlay');
+    const cardPickTitle = document.getElementById('cardPickTitle');
+    const cardPickHint = document.getElementById('cardPickHint');
+    const cardPickGrid = document.getElementById('cardPickGrid');
+    const btnSkipPick = document.getElementById('btnSkipPick');
+    const btnCancelPick = document.getElementById('btnCancelPick');
+    const PTCG_SEARCH_REFERER = 'https://asia.pokemon-card.com/hk/card-search/';
+    let cardPickResolve = null;
     const deckStatus = document.getElementById('deckStatus');
     document.getElementById('appVersion').textContent = `v${APP_VERSION}`;
     const printRoot = document.getElementById('print-root');
@@ -974,6 +1083,37 @@
       return res.json();
     }
 
+    function getCardThumbUrl(imageUrl) {
+      if (isElectron) return imageUrl;
+      return `/api/fetch-image?url=${encodeURIComponent(imageUrl)}&referer=${encodeURIComponent(PTCG_SEARCH_REFERER)}`;
+    }
+
+    function closeCardPickOverlay(result) {
+      cardPickOverlay.classList.remove('is-open');
+      cardPickGrid.innerHTML = '';
+      if (cardPickResolve) {
+        const resolve = cardPickResolve;
+        cardPickResolve = null;
+        resolve(result);
+      }
+    }
+
+    function pickCardFromUrls(name, quantity, urls) {
+      return new Promise((resolve) => {
+        cardPickResolve = resolve;
+        cardPickTitle.textContent = `選擇卡牌：${name}`;
+        cardPickHint.textContent = `找到 ${urls.length} 個版本，請點選要匯入的卡牌（數量：${quantity} 張）`;
+        cardPickGrid.innerHTML = urls.map((url) => {
+          const file = url.split('/').pop();
+          return `<button type="button" class="card-pick-item" data-url="${encodeURIComponent(url)}" aria-label="${name} ${file}">
+            <img src="${getCardThumbUrl(url)}" alt="" loading="lazy">
+            <span class="card-pick-label">${file}</span>
+          </button>`;
+        }).join('');
+        cardPickOverlay.classList.add('is-open');
+      });
+    }
+
     function openImportDialog() {
       importStatus.textContent = '';
       importOverlay.classList.add('is-open');
@@ -991,7 +1131,7 @@
         return { ok: false, error: '沒有可解析的卡牌行' };
       }
 
-      const summary = { added: 0, failed: [], multi: [] };
+      const summary = { added: 0, failed: [], skipped: [] };
       currentDeckPath = null;
       btnRunImport.disabled = true;
 
@@ -1015,29 +1155,29 @@
         }
 
         const urls = searchResult.images;
-        if (urls.length > 1) summary.multi.push({ name, count: urls.length });
+        let targetUrl = urls[0];
 
-        if (urls.length === 1) {
-          try {
-            const dataUrl = await fetchImageAsDataUrl(urls[0]);
-            if (!(await validateImageDataUrl(dataUrl))) throw new Error('invalid');
-            addCardFromSrc(`${name}.png`, dataUrl, quantity, { skipRender: true });
-            summary.added += 1;
-          } catch {
-            summary.failed.push(`${name}（圖片下載失敗）`);
+        if (urls.length > 1) {
+          const picked = await pickCardFromUrls(name, quantity, urls);
+          if (picked === '__CANCEL__') {
+            summary.cancelled = true;
+            break;
           }
-        } else {
-          for (const url of urls) {
-            try {
-              const dataUrl = await fetchImageAsDataUrl(url);
-              if (!(await validateImageDataUrl(dataUrl))) continue;
-              const file = url.split('/').pop();
-              addCardFromSrc(`${name}-${file}`, dataUrl, 1, { skipRender: true });
-              summary.added += 1;
-            } catch {
-              // 略過單張失敗
-            }
+          if (!picked) {
+            summary.skipped.push(name);
+            continue;
           }
+          targetUrl = picked;
+        }
+
+        try {
+          const dataUrl = await fetchImageAsDataUrl(targetUrl);
+          if (!(await validateImageDataUrl(dataUrl))) throw new Error('invalid');
+          const file = targetUrl.split('/').pop();
+          addCardFromSrc(`${name}-${file}`, dataUrl, quantity, { skipRender: true });
+          summary.added += 1;
+        } catch {
+          summary.failed.push(`${name}（圖片下載失敗）`);
         }
       }
 
@@ -1045,9 +1185,11 @@
       updateUI();
       btnRunImport.disabled = false;
 
-      let message = `已匯入 ${summary.added} 張卡牌`;
-      if (summary.multi.length > 0) {
-        message += `；${summary.multi.length} 種有多個版本（請刪除多餘卡牌）`;
+      let message = summary.cancelled
+        ? `匯入已取消，已加入 ${summary.added} 張卡牌`
+        : `已匯入 ${summary.added} 張卡牌`;
+      if (summary.skipped.length > 0) {
+        message += `；已跳過：${summary.skipped.join('、')}`;
       }
       if (summary.failed.length > 0) {
         message += `；失敗：${summary.failed.join('、')}`;
@@ -1648,8 +1790,26 @@
       }
     });
 
+    cardPickGrid.addEventListener('click', (e) => {
+      const btn = e.target.closest('.card-pick-item');
+      if (!btn) return;
+      closeCardPickOverlay(decodeURIComponent(btn.dataset.url));
+    });
+
+    btnSkipPick.addEventListener('click', () => closeCardPickOverlay(null));
+
+    btnCancelPick.addEventListener('click', () => closeCardPickOverlay('__CANCEL__'));
+
+    cardPickOverlay.addEventListener('click', (e) => {
+      if (e.target === cardPickOverlay) closeCardPickOverlay(null);
+    });
+
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (cardPickOverlay.classList.contains('is-open')) {
+        closeCardPickOverlay(null);
+        return;
+      }
       if (importOverlay.classList.contains('is-open')) {
         closeImportDialog();
         return;
