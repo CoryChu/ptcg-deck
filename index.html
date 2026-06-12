@@ -41,9 +41,6 @@
       color: var(--text);
       min-height: 100vh;
       min-height: 100dvh;
-      height: 100vh;
-      height: 100dvh;
-      overflow: hidden;
       display: flex;
       flex-direction: column;
     }
@@ -175,10 +172,7 @@
 
     .preview-section {
       flex: 1;
-      min-height: 0;
       padding: 0 1.5rem 1.5rem;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
     }
 
     body.is-card-dragging {
@@ -2006,16 +2000,14 @@
       }
     }
 
+    function getPageScrollMax() {
+      return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    }
+
     function updateDragAutoScroll(clientY) {
-      if (!previewSection || !pointerReorder?.active) return;
-      const maxScroll = previewSection.scrollHeight - previewSection.clientHeight;
+      if (!pointerReorder?.active) return;
+      const maxScroll = getPageScrollMax();
       const viewH = window.innerHeight;
-      // #region agent log
-      if (!pointerReorder._scrollLogAt || Date.now() - pointerReorder._scrollLogAt > 400) {
-        pointerReorder._scrollLogAt = Date.now();
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'post-fix',hypothesisId:'A',location:'index.html:updateDragAutoScroll',message:'auto-scroll metrics',data:{clientY,maxScroll,scrollTop:previewSection.scrollTop,scrollHeight:previewSection.scrollHeight,clientHeight:previewSection.clientHeight,viewH,loopActive:!!dragScrollRaf},timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
       if (maxScroll <= 0) return;
 
       let delta = 0;
@@ -2027,11 +2019,8 @@
         delta = Math.ceil(DRAG_MAX_SCROLL_SPEED * t);
       }
       if (delta) {
-        const before = previewSection.scrollTop;
-        previewSection.scrollTop = Math.max(0, Math.min(maxScroll, previewSection.scrollTop + delta));
-        // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'verify',hypothesisId:'B',location:'index.html:updateDragAutoScroll',message:'scroll applied',data:{clientY,delta,before,after:previewSection.scrollTop,maxScroll},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
+        const next = Math.max(0, Math.min(maxScroll, window.scrollY + delta));
+        window.scrollTo(0, next);
       }
     }
 
@@ -2046,9 +2035,6 @@
     }
 
     function startDragScrollLoop() {
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'post-fix',hypothesisId:'D',location:'index.html:startDragScrollLoop',message:'drag scroll loop started',data:{hadRaf:!!dragScrollRaf},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (!dragScrollRaf) dragScrollRaf = requestAnimationFrame(dragScrollTick);
     }
 
@@ -2129,10 +2115,6 @@
 
     function activatePointerDrag() {
       if (!pointerReorder || pointerReorder.active) return;
-      const maxScroll = previewSection ? previewSection.scrollHeight - previewSection.clientHeight : -1;
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'verify',hypothesisId:'E',location:'index.html:activatePointerDrag',message:'drag activated',data:{isTouch:pointerReorder.isTouch,maxScroll,scrollHeight:previewSection?.scrollHeight,clientHeight:previewSection?.clientHeight},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       pointerReorder.active = true;
       pointerReorder.cardEl.classList.add('is-dragging');
       if (pointerReorder.isTouch) {
