@@ -173,6 +173,22 @@
       flex: 1;
       padding: 0 1.5rem 1.5rem;
       overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    body.is-card-dragging {
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    body.is-card-dragging .preview-section {
+      overflow: hidden !important;
+      touch-action: none !important;
+      overscroll-behavior: none;
+    }
+
+    body.is-card-dragging .preview-grid {
+      touch-action: none;
     }
 
     .preview-section-header {
@@ -1945,7 +1961,7 @@
     const TOUCH_HOLD_MS = 360;
     const TOUCH_HOLD_CANCEL_PX = 14;
     const previewSection = document.querySelector('.preview-section');
-    let lockedScrollY = 0;
+    let lockedSectionScrollTop = 0;
 
     function isTouchPointerType(type) {
       return type === 'touch';
@@ -1958,28 +1974,38 @@
       }
     }
 
+    function pinSectionScroll() {
+      if (!previewSection || !pointerReorder?.active) return;
+      if (previewSection.scrollTop !== lockedSectionScrollTop) {
+        previewSection.scrollTop = lockedSectionScrollTop;
+      }
+    }
+
     function setScrollLocked(locked) {
       if (locked) {
-        lockedScrollY = window.scrollY;
-        document.body.style.position = 'fixed';
-        document.body.style.top = `-${lockedScrollY}px`;
-        document.body.style.left = '0';
-        document.body.style.right = '0';
-        document.body.style.width = '100%';
-        document.body.style.overflow = 'hidden';
+        lockedSectionScrollTop = previewSection?.scrollTop ?? 0;
+        document.body.classList.add('is-card-dragging');
         document.documentElement.style.overflow = 'hidden';
-        if (previewSection) previewSection.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+        if (previewSection) {
+          previewSection.style.overflow = 'hidden';
+          previewSection.style.touchAction = 'none';
+        }
       } else {
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.left = '';
-        document.body.style.right = '';
-        document.body.style.width = '';
-        document.body.style.overflow = '';
+        document.body.classList.remove('is-card-dragging');
         document.documentElement.style.overflow = '';
-        if (previewSection) previewSection.style.overflow = '';
-        window.scrollTo(0, lockedScrollY);
+        document.body.style.overflow = '';
+        if (previewSection) {
+          previewSection.style.overflow = '';
+          previewSection.style.touchAction = '';
+          previewSection.scrollTop = lockedSectionScrollTop;
+        }
       }
+    }
+
+    function onSectionScroll() {
+      if (!pointerReorder?.active) return;
+      pinSectionScroll();
     }
 
     function onGlobalPointerMove(e) {
@@ -1987,12 +2013,14 @@
       pointerReorder.lastX = e.clientX;
       pointerReorder.lastY = e.clientY;
       e.preventDefault();
+      pinSectionScroll();
       updatePointerReorderHover(e.clientX, e.clientY);
     }
 
     function onGlobalTouchMove(e) {
       if (!pointerReorder?.active || !pointerReorder.isTouch) return;
       e.preventDefault();
+      pinSectionScroll();
     }
 
     function onGlobalPointerUp(e) {
@@ -2009,14 +2037,22 @@
       window.addEventListener('pointermove', onGlobalPointerMove, { passive: false });
       window.addEventListener('pointerup', onGlobalPointerUp);
       window.addEventListener('pointercancel', onGlobalPointerCancel);
-      window.addEventListener('touchmove', onGlobalTouchMove, { passive: false });
+      window.addEventListener('touchmove', onGlobalTouchMove, { passive: false, capture: true });
+      if (previewSection) {
+        previewSection.addEventListener('scroll', onSectionScroll, { passive: false });
+        previewSection.addEventListener('touchmove', onGlobalTouchMove, { passive: false, capture: true });
+      }
     }
 
     function detachGlobalDragListeners() {
       window.removeEventListener('pointermove', onGlobalPointerMove);
       window.removeEventListener('pointerup', onGlobalPointerUp);
       window.removeEventListener('pointercancel', onGlobalPointerCancel);
-      window.removeEventListener('touchmove', onGlobalTouchMove);
+      window.removeEventListener('touchmove', onGlobalTouchMove, { capture: true });
+      if (previewSection) {
+        previewSection.removeEventListener('scroll', onSectionScroll);
+        previewSection.removeEventListener('touchmove', onGlobalTouchMove, { capture: true });
+      }
     }
 
     function endPointerReorderSession() {
@@ -2030,8 +2066,8 @@
       pointerReorder.cardEl.classList.add('is-dragging');
       if (pointerReorder.isTouch) {
         pointerReorder.cardEl.classList.add('is-drag-ready');
-        setScrollLocked(true);
       }
+      setScrollLocked(true);
       attachGlobalDragListeners();
       updatePointerReorderHover(pointerReorder.lastX, pointerReorder.lastY);
     }
