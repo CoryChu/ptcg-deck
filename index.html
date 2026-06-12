@@ -214,6 +214,14 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       overflow: hidden;
+      cursor: grab;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .preview-card:active {
+      cursor: grabbing;
     }
 
     .preview-card.is-dragging {
@@ -224,40 +232,18 @@
       box-shadow: 0 0 0 2px var(--accent);
     }
 
-    .preview-card-drag-handle {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      padding: 0.22rem 0;
-      border: none;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg);
-      color: var(--muted);
-      font-size: 0.7rem;
-      letter-spacing: 0.2em;
-      line-height: 1;
-      cursor: grab;
-      touch-action: none;
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    .preview-card-drag-handle:active {
-      cursor: grabbing;
-      color: var(--accent);
-    }
-
     .preview-card-img {
       width: 100%;
       aspect-ratio: 63 / 88;
       object-fit: cover;
       display: block;
       background: #000;
-      cursor: zoom-in;
+      cursor: inherit;
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
+      -webkit-user-drag: none;
+      user-drag: none;
+      pointer-events: auto;
     }
 
     .preview-card-controls {
@@ -267,6 +253,7 @@
       padding: 0.5rem 0.75rem;
       gap: 0.5rem;
       touch-action: manipulation;
+      cursor: default;
     }
 
     .qty-group {
@@ -1789,9 +1776,34 @@
       lightboxImg.src = '';
     }
 
+    // #region agent log
+    function debugDragLog(hypothesisId, location, message, data) {
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '40b010' },
+        body: JSON.stringify({
+          sessionId: '40b010',
+          runId: 'pre-fix',
+          hypothesisId,
+          location,
+          message,
+          data,
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+
+    function isCardDragBlockedTarget(target) {
+      return Boolean(target.closest('button, input, .qty-group, .btn-delete, .preview-card-controls'));
+    }
+
     function reorderCards(fromId, toId) {
       const fromIdx = cards.findIndex((c) => c.id === fromId);
       const toIdx = cards.findIndex((c) => c.id === toId);
+      // #region agent log
+      debugDragLog('E', 'index.html:reorderCards', 'reorder attempt', { fromId, toId, fromIdx, toIdx });
+      // #endregion
       if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
       const [moved] = cards.splice(fromIdx, 1);
       cards.splice(toIdx, 0, moved);
@@ -1808,124 +1820,112 @@
 
     function renderPreview() {
       previewGrid.innerHTML = cards.map(card => `
-        <div class="preview-card" data-id="${card.id}" draggable="true">
-          <button type="button" class="preview-card-drag-handle" aria-label="拖曳以調整順序" title="拖曳以調整順序">⋮⋮</button>
-          <img class="preview-card-img" src="${card.src}" alt="${card.name}" data-action="view" data-id="${card.id}">
+        <div class="preview-card" data-id="${card.id}">
+          <img class="preview-card-img" src="${card.src}" alt="${card.name}" draggable="false" data-action="view" data-id="${card.id}">
           <div class="preview-card-controls">
             <div class="qty-group">
-              <button type="button" data-action="dec" data-id="${card.id}">−</button>
-              <input type="number" min="0" max="999" value="${card.quantity}" data-id="${card.id}">
-              <button type="button" data-action="inc" data-id="${card.id}">+</button>
+              <button type="button" draggable="false" data-action="dec" data-id="${card.id}">−</button>
+              <input type="number" min="0" max="999" value="${card.quantity}" draggable="false" data-id="${card.id}">
+              <button type="button" draggable="false" data-action="inc" data-id="${card.id}">+</button>
             </div>
-            <button type="button" class="btn-delete" data-action="del" data-id="${card.id}">刪除</button>
+            <button type="button" class="btn-delete" draggable="false" data-action="del" data-id="${card.id}">刪除</button>
           </div>
         </div>
       `).join('');
     }
 
     let lastQtyTouchAt = 0;
-    let draggingCardId = null;
-    let touchReorder = null;
+    let pointerReorder = null;
+    let cardDragDidMove = false;
+    const CARD_DRAG_THRESHOLD = 8;
 
-    previewGrid.addEventListener('dragstart', (e) => {
-      const card = e.target.closest('.preview-card');
-      if (!card || !e.target.closest('.preview-card-drag-handle')) {
-        e.preventDefault();
-        return;
-      }
-      draggingCardId = Number(card.dataset.id);
-      card.classList.add('is-dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(draggingCardId));
-    });
-
-    previewGrid.addEventListener('dragend', (e) => {
-      const card = e.target.closest('.preview-card');
-      if (card) card.classList.remove('is-dragging');
-      clearCardDragOverState();
-      draggingCardId = null;
-    });
-
-    previewGrid.addEventListener('dragover', (e) => {
-      if (!draggingCardId) return;
-      const card = e.target.closest('.preview-card');
-      if (!card) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const targetId = Number(card.dataset.id);
-      if (targetId === draggingCardId) return;
-      clearCardDragOverState();
-      card.classList.add('is-drag-over');
-    });
-
-    previewGrid.addEventListener('dragleave', (e) => {
-      const card = e.target.closest('.preview-card');
-      if (!card) return;
-      const related = e.relatedTarget;
-      if (!related || !card.contains(related)) {
-        card.classList.remove('is-drag-over');
-      }
-    });
-
-    previewGrid.addEventListener('drop', (e) => {
-      if (!draggingCardId) return;
-      e.preventDefault();
-      const card = e.target.closest('.preview-card');
-      if (!card) return;
-      const targetId = Number(card.dataset.id);
-      card.classList.remove('is-drag-over');
-      if (targetId !== draggingCardId) {
-        reorderCards(draggingCardId, targetId);
-      }
-      draggingCardId = null;
-    });
-
-    previewGrid.addEventListener('touchstart', (e) => {
-      const handle = e.target.closest('.preview-card-drag-handle');
-      if (!handle) return;
-      const card = handle.closest('.preview-card');
-      if (!card) return;
-      touchReorder = {
-        id: Number(card.dataset.id),
-        cardEl: card,
-        hoverId: null,
-      };
-      card.classList.add('is-dragging');
-    }, { passive: true });
-
-    previewGrid.addEventListener('touchmove', (e) => {
-      if (!touchReorder) return;
-      e.preventDefault();
-      const touch = e.touches[0];
-      const hit = document.elementFromPoint(touch.clientX, touch.clientY);
+    function updatePointerReorderHover(clientX, clientY) {
+      if (!pointerReorder) return;
+      const hit = document.elementFromPoint(clientX, clientY);
       const targetCard = hit?.closest('.preview-card');
       clearCardDragOverState();
       if (targetCard) {
         const targetId = Number(targetCard.dataset.id);
-        if (targetId !== touchReorder.id) {
+        if (targetId !== pointerReorder.id) {
           targetCard.classList.add('is-drag-over');
-          touchReorder.hoverId = targetId;
+          pointerReorder.hoverId = targetId;
         } else {
-          touchReorder.hoverId = null;
+          pointerReorder.hoverId = null;
         }
       } else {
-        touchReorder.hoverId = null;
+        pointerReorder.hoverId = null;
       }
-    }, { passive: false });
+    }
 
-    function finishTouchReorder() {
-      if (!touchReorder) return;
-      touchReorder.cardEl.classList.remove('is-dragging');
-      if (touchReorder.hoverId) {
-        reorderCards(touchReorder.id, touchReorder.hoverId);
+    function finishPointerReorder() {
+      if (!pointerReorder) return;
+      const { cardEl, hoverId, id, active, pointerId } = pointerReorder;
+      // #region agent log
+      debugDragLog('E', 'index.html:finishPointerReorder', 'pointer reorder end', { id, hoverId, active });
+      // #endregion
+      cardEl.classList.remove('is-dragging');
+      try { cardEl.releasePointerCapture(pointerId); } catch (_) {}
+      if (active && hoverId) {
+        reorderCards(id, hoverId);
+        cardDragDidMove = true;
+        setTimeout(() => { cardDragDidMove = false; }, 300);
       } else {
         clearCardDragOverState();
       }
-      touchReorder = null;
+      pointerReorder = null;
     }
 
-    previewGrid.addEventListener('touchend', finishTouchReorder);
-    previewGrid.addEventListener('touchcancel', finishTouchReorder);
+    previewGrid.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const card = e.target.closest('.preview-card');
+      const blocked = isCardDragBlockedTarget(e.target);
+      // #region agent log
+      debugDragLog('F', 'index.html:pointerdown', 'pointerdown on card grid', {
+        tag: e.target.tagName,
+        hasCard: Boolean(card),
+        blocked,
+        cardId: card ? Number(card.dataset.id) : null,
+        pointerType: e.pointerType,
+      });
+      // #endregion
+      if (!card || blocked) return;
+      pointerReorder = {
+        id: Number(card.dataset.id),
+        cardEl: card,
+        startX: e.clientX,
+        startY: e.clientY,
+        hoverId: null,
+        active: false,
+        pointerId: e.pointerId,
+      };
+      try { card.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    previewGrid.addEventListener('pointermove', (e) => {
+      if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+      const dx = e.clientX - pointerReorder.startX;
+      const dy = e.clientY - pointerReorder.startY;
+      if (!pointerReorder.active) {
+        if (Math.hypot(dx, dy) < CARD_DRAG_THRESHOLD) return;
+        pointerReorder.active = true;
+        pointerReorder.cardEl.classList.add('is-dragging');
+        // #region agent log
+        debugDragLog('F', 'index.html:pointermove', 'drag activated', { cardId: pointerReorder.id, dx, dy });
+        // #endregion
+      }
+      e.preventDefault();
+      updatePointerReorderHover(e.clientX, e.clientY);
+    }, { passive: false });
+
+    previewGrid.addEventListener('pointerup', (e) => {
+      if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+      finishPointerReorder();
+    });
+
+    previewGrid.addEventListener('pointercancel', (e) => {
+      if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+      finishPointerReorder();
+    });
 
     function adjustCardQuantity(card, action) {
       if (action === 'inc') {
@@ -1945,6 +1945,7 @@
       if (!card) return;
 
       if (btn.dataset.action === 'view') {
+        if (cardDragDidMove) return;
         openImageLightbox(card);
         return;
       }
