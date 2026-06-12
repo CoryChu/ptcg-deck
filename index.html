@@ -1945,6 +1945,7 @@
     const TOUCH_HOLD_MS = 360;
     const TOUCH_HOLD_CANCEL_PX = 14;
     const previewSection = document.querySelector('.preview-section');
+    let lockedScrollY = 0;
 
     function isTouchPointerType(type) {
       return type === 'touch';
@@ -1958,9 +1959,27 @@
     }
 
     function setScrollLocked(locked) {
-      document.body.style.overflow = locked ? 'hidden' : '';
-      document.documentElement.style.overflow = locked ? 'hidden' : '';
-      if (previewSection) previewSection.style.overflow = locked ? 'hidden' : '';
+      if (locked) {
+        lockedScrollY = window.scrollY;
+        document.body.style.position = 'fixed';
+        document.body.style.top = `-${lockedScrollY}px`;
+        document.body.style.left = '0';
+        document.body.style.right = '0';
+        document.body.style.width = '100%';
+        document.body.style.overflow = 'hidden';
+        document.documentElement.style.overflow = 'hidden';
+        if (previewSection) previewSection.style.overflow = 'hidden';
+      } else {
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+        document.body.style.width = '';
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+        if (previewSection) previewSection.style.overflow = '';
+        window.scrollTo(0, lockedScrollY);
+      }
     }
 
     function onGlobalPointerMove(e) {
@@ -1971,21 +1990,33 @@
       updatePointerReorderHover(e.clientX, e.clientY);
     }
 
-    function onGlobalPointerEnd(e) {
-      if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+    function onGlobalTouchMove(e) {
+      if (!pointerReorder?.active || !pointerReorder.isTouch) return;
+      e.preventDefault();
+    }
+
+    function onGlobalPointerUp(e) {
+      if (!pointerReorder?.active || pointerReorder.pointerId !== e.pointerId) return;
       finishPointerReorder(e);
+    }
+
+    function onGlobalPointerCancel(e) {
+      if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+      cancelPointerReorder();
     }
 
     function attachGlobalDragListeners() {
       window.addEventListener('pointermove', onGlobalPointerMove, { passive: false });
-      window.addEventListener('pointerup', onGlobalPointerEnd);
-      window.addEventListener('pointercancel', onGlobalPointerEnd);
+      window.addEventListener('pointerup', onGlobalPointerUp);
+      window.addEventListener('pointercancel', onGlobalPointerCancel);
+      window.addEventListener('touchmove', onGlobalTouchMove, { passive: false });
     }
 
     function detachGlobalDragListeners() {
       window.removeEventListener('pointermove', onGlobalPointerMove);
-      window.removeEventListener('pointerup', onGlobalPointerEnd);
-      window.removeEventListener('pointercancel', onGlobalPointerEnd);
+      window.removeEventListener('pointerup', onGlobalPointerUp);
+      window.removeEventListener('pointercancel', onGlobalPointerCancel);
+      window.removeEventListener('touchmove', onGlobalTouchMove);
     }
 
     function endPointerReorderSession() {
@@ -2031,6 +2062,7 @@
     }
 
     function finishPointerReorder(e) {
+      if (e?.type === 'pointercancel') return;
       clearDragHoldTimer();
       if (!pointerReorder) return;
       const { cardEl, id, active, pointerId, lastX, lastY, dropTarget, isTouch } = pointerReorder;
@@ -2116,21 +2148,15 @@
 
     previewGrid.addEventListener('pointerup', (e) => {
       if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
-      if (!pointerReorder.active) {
-        clearDragHoldTimer();
-        pointerReorder = null;
-        return;
-      }
-      finishPointerReorder(e);
+      if (pointerReorder.active) return;
+      clearDragHoldTimer();
+      pointerReorder = null;
     });
 
     previewGrid.addEventListener('pointercancel', (e) => {
       if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
-      if (!pointerReorder.active) {
-        cancelPointerReorder();
-        return;
-      }
-      finishPointerReorder(e);
+      if (pointerReorder.active) return;
+      cancelPointerReorder();
     });
 
     function adjustCardQuantity(card, action) {
