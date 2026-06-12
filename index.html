@@ -175,12 +175,32 @@
       overflow-y: auto;
     }
 
+    .preview-section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
     .preview-section h2 {
       font-size: 0.9rem;
       color: var(--muted);
-      margin-bottom: 0.75rem;
+      margin: 0;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+    }
+
+    .card-count-badge {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .card-count-badge.is-empty {
+      color: var(--muted);
+      font-weight: 500;
     }
 
     .preview-grid {
@@ -344,12 +364,27 @@
       font-size: 0.82rem;
       color: var(--muted);
       margin: 0.65rem 0 0.75rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
+
+    .import-status.is-error { color: var(--danger); }
+    .import-status.is-warning { color: #f59e0b; }
+    .import-status.is-success { color: #22c55e; }
 
     .import-actions {
       display: flex;
-      justify-content: flex-end;
+      justify-content: space-between;
+      align-items: center;
       gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .import-actions-right {
+      display: flex;
+      gap: 0.5rem;
+      margin-left: auto;
     }
 
     .card-pick-overlay {
@@ -865,7 +900,10 @@
   </div>
 
   <section class="preview-section">
-    <h2>卡牌清單</h2>
+    <div class="preview-section-header">
+      <h2>卡牌清單</h2>
+      <span id="cardCountBadge" class="card-count-badge is-empty">共 0 張</span>
+    </div>
     <div id="previewGrid" class="preview-grid"></div>
     <p id="emptyHint" class="empty-hint">尚未加入任何卡牌</p>
   </section>
@@ -881,8 +919,11 @@
       <textarea id="importText"></textarea>
       <p id="importStatus" class="import-status"></p>
       <div class="import-actions">
-        <button id="btnCancelImport" class="btn btn-secondary" type="button">取消</button>
-        <button id="btnRunImport" class="btn btn-primary" type="button">開始匯入</button>
+        <button id="btnClearImport" class="btn btn-danger" type="button">Clear</button>
+        <div class="import-actions-right">
+          <button id="btnCancelImport" class="btn btn-secondary" type="button">取消</button>
+          <button id="btnRunImport" class="btn btn-primary" type="button">開始匯入</button>
+        </div>
       </div>
     </div>
   </div>
@@ -939,6 +980,7 @@
     const dropZone = document.getElementById('dropZone');
     const previewGrid = document.getElementById('previewGrid');
     const emptyHint = document.getElementById('emptyHint');
+    const cardCountBadge = document.getElementById('cardCountBadge');
     const btnPreview = document.getElementById('btnPreview');
     const btnPrint = document.getElementById('btnPrint');
     const btnPdf = document.getElementById('btnPdf');
@@ -950,6 +992,7 @@
     const importText = document.getElementById('importText');
     const importStatus = document.getElementById('importStatus');
     const btnCancelImport = document.getElementById('btnCancelImport');
+    const btnClearImport = document.getElementById('btnClearImport');
     const btnRunImport = document.getElementById('btnRunImport');
     const cardPickOverlay = document.getElementById('cardPickOverlay');
     const cardPickTitle = document.getElementById('cardPickTitle');
@@ -1122,9 +1165,19 @@
       btnClear.disabled = !hasCards;
       emptyHint.style.display = hasCards ? 'none' : 'block';
       previewGrid.style.display = hasCards ? 'grid' : 'none';
+      cardCountBadge.textContent = hasCards
+        ? `共 ${totalQty} 張（${cards.length} 種）`
+        : '共 0 張';
+      cardCountBadge.classList.toggle('is-empty', totalQty === 0);
       deckStatus.textContent = currentDeckPath
         ? currentDeckPath.split('/').pop()
         : (hasCards ? '未儲存的牌組' : '');
+    }
+
+    function setImportStatus(message, tone = '') {
+      importStatus.textContent = message;
+      importStatus.classList.remove('is-error', 'is-warning', 'is-success');
+      if (tone) importStatus.classList.add(`is-${tone}`);
     }
 
     function addCardFromSrc(name, src, quantity = 1, options = {}) {
@@ -1204,14 +1257,14 @@
     }
 
     function openImportDialog() {
-      importStatus.textContent = '';
+      setImportStatus('');
       importOverlay.classList.add('is-open');
       importText.focus();
     }
 
     function closeImportDialog() {
       importOverlay.classList.remove('is-open');
-      importStatus.textContent = '';
+      setImportStatus('');
     }
 
     async function importDeckFromText(text) {
@@ -1227,7 +1280,7 @@
       for (let i = 0; i < entries.length; i++) {
         const { name, quantity } = entries[i];
         const progress = `搜尋中 (${i + 1}/${entries.length})：${name}…`;
-        importStatus.textContent = progress;
+        setImportStatus(progress);
         deckStatus.textContent = progress;
 
         let searchResult;
@@ -1274,16 +1327,43 @@
       updateUI();
       btnRunImport.disabled = false;
 
+      const hasIssues = summary.failed.length > 0 || summary.skipped.length > 0 || summary.cancelled;
       let message = summary.cancelled
         ? `匯入已取消，已加入 ${summary.added} 張卡牌`
         : `已匯入 ${summary.added} 張卡牌`;
       if (summary.skipped.length > 0) {
-        message += `；已跳過：${summary.skipped.join('、')}`;
+        message += `\n已跳過：${summary.skipped.join('、')}`;
       }
       if (summary.failed.length > 0) {
-        message += `；失敗：${summary.failed.join('、')}`;
+        message += `\n失敗：${summary.failed.join('、')}`;
       }
-      return { ok: true, message, summary };
+
+      if (summary.added === 0) {
+        if (summary.cancelled) {
+          return { ok: false, error: '匯入已取消，未加入任何卡牌', summary };
+        }
+        if (summary.failed.length > 0) {
+          return {
+            ok: false,
+            error: `匯入失敗，未加入任何卡牌\n失敗：${summary.failed.join('、')}`,
+            summary,
+          };
+        }
+        if (summary.skipped.length > 0) {
+          return {
+            ok: false,
+            error: `未加入任何卡牌\n已跳過：${summary.skipped.join('、')}`,
+            summary,
+          };
+        }
+      }
+
+      return {
+        ok: true,
+        partial: hasIssues,
+        message,
+        summary,
+      };
     }
 
     function addCardFromFile(file) {
@@ -1959,6 +2039,12 @@
 
     btnCancelImport.addEventListener('click', closeImportDialog);
 
+    btnClearImport.addEventListener('click', () => {
+      importText.value = '';
+      setImportStatus('');
+      importText.focus();
+    });
+
     importOverlay.addEventListener('click', (e) => {
       if (e.target === importOverlay) closeImportDialog();
     });
@@ -1966,20 +2052,29 @@
     btnRunImport.addEventListener('click', async () => {
       const text = importText.value;
       if (!text.trim()) {
-        importStatus.textContent = '請貼上牌組文字';
+        setImportStatus('請貼上牌組文字', 'error');
         return;
       }
-      importStatus.textContent = '準備匯入…';
+      setImportStatus('準備匯入…');
       try {
         const result = await importDeckFromText(text);
-        if (result.ok) {
-          closeImportDialog();
-          deckStatus.textContent = `匯入完成：${result.message}`;
-        } else {
-          importStatus.textContent = result.error || '匯入失敗';
+        if (!result.ok) {
+          setImportStatus(result.error || '匯入失敗', 'error');
+          if (result.summary?.added > 0) {
+            deckStatus.textContent = `匯入未完成：已加入 ${result.summary.added} 張卡牌`;
+          }
+          return;
         }
+        if (result.partial) {
+          setImportStatus(result.message, 'warning');
+          deckStatus.textContent = `匯入完成（部分失敗）：${result.message.replace(/\n/g, '；')}`;
+          return;
+        }
+        closeImportDialog();
+        setImportStatus('');
+        deckStatus.textContent = `匯入完成：${result.message}`;
       } catch (err) {
-        importStatus.textContent = `匯入失敗：${err.message}`;
+        setImportStatus(`匯入失敗：${err.message}`, 'error');
       }
     });
 
