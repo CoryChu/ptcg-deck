@@ -212,15 +212,14 @@
       font-size: 0.95rem;
       font-weight: 600;
       text-align: center;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--bg);
+      border: none;
+      border-radius: 0;
+      background: transparent;
       color: var(--text);
     }
 
     .deck-name-input:focus {
       outline: none;
-      border-color: var(--accent);
     }
 
     .deck-name-input::placeholder {
@@ -251,6 +250,7 @@
 
     .preview-card.is-dragging {
       opacity: 0.45;
+      pointer-events: none;
     }
 
     .preview-card.is-drag-over {
@@ -859,10 +859,9 @@
         min-width: 0;
         max-width: none;
         margin: 0;
-        padding: 0.22rem 0.35rem;
+        padding: 0.1rem 0.2rem;
         font-size: 16px;
         font-weight: 600;
-        border-radius: 6px;
       }
 
       .card-count-badge {
@@ -1890,7 +1889,16 @@
     }
 
     function computeDropTarget(clientX, clientY, dragId) {
-      const hit = document.elementFromPoint(clientX, clientY);
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+      const draggingEl = previewGrid.querySelector(`.preview-card[data-id="${dragId}"]`);
+      const prevPe = draggingEl?.style.pointerEvents ?? '';
+      if (draggingEl) draggingEl.style.pointerEvents = 'none';
+      let hit;
+      try {
+        hit = document.elementFromPoint(clientX, clientY);
+      } finally {
+        if (draggingEl) draggingEl.style.pointerEvents = prevPe;
+      }
       const targetCard = hit?.closest('.preview-card');
       if (!targetCard) return null;
       const targetId = Number(targetCard.dataset.id);
@@ -1971,12 +1979,20 @@
     function finishPointerReorder(e) {
       clearDragHoldTimer();
       if (!pointerReorder) return;
-      const { cardEl, id, active, pointerId, lastX, lastY } = pointerReorder;
+      const { cardEl, id, active, pointerId, lastX, lastY, dropTarget, isTouch } = pointerReorder;
       cardEl.classList.remove('is-dragging', 'is-drag-ready');
       try { cardEl.releasePointerCapture(pointerId); } catch (_) {}
-      const drop = active
-        ? computeDropTarget(e.clientX ?? lastX, e.clientY ?? lastY, id)
-        : null;
+      pointerReorder = null;
+
+      let drop = null;
+      if (active) {
+        drop = dropTarget;
+        if (!drop) {
+          const x = isTouch ? lastX : (e.clientX ?? lastX);
+          const y = isTouch ? lastY : (e.clientY ?? lastY);
+          drop = computeDropTarget(x, y, id);
+        }
+      }
       if (active && drop) {
         reorderCardsToPosition(id, drop.targetId, drop.insertAfter);
         cardDragDidMove = true;
@@ -1984,7 +2000,6 @@
       } else {
         clearCardDragOverState();
       }
-      pointerReorder = null;
     }
 
     previewGrid.addEventListener('pointerdown', (e) => {
@@ -2013,6 +2028,7 @@
           pointerReorder.active = true;
           pointerReorder.holdActivated = true;
           pointerReorder.cardEl.classList.add('is-dragging', 'is-drag-ready');
+          updatePointerReorderHover(pointerReorder.lastX, pointerReorder.lastY);
         }, TOUCH_DRAG_HOLD_MS);
       }
       try { card.setPointerCapture(e.pointerId); } catch (_) {}
