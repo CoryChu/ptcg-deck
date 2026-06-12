@@ -203,6 +203,31 @@
       font-weight: 500;
     }
 
+    .deck-name-input {
+      flex: 1;
+      min-width: 0;
+      max-width: 240px;
+      margin: 0 0.25rem;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-align: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .deck-name-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .deck-name-input::placeholder {
+      color: var(--muted);
+      font-weight: 500;
+    }
+
     .preview-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -805,6 +830,19 @@
 
       .preview-section { padding: 0 1rem 1rem; }
 
+      .preview-section-header {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .deck-name-input {
+        order: 3;
+        flex: 1 1 100%;
+        max-width: none;
+        margin: 0;
+        font-size: 16px;
+      }
+
       .preview-grid {
         grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
         gap: 0.75rem;
@@ -922,6 +960,7 @@
   <section class="preview-section">
     <div class="preview-section-header">
       <h2>卡牌清單</h2>
+      <input type="text" id="deckNameInput" class="deck-name-input" value="未命名牌組" maxlength="80" aria-label="牌組名稱" placeholder="未命名牌組">
       <span id="cardCountBadge" class="card-count-badge is-empty">共 0 張</span>
     </div>
     <div id="previewGrid" class="preview-grid"></div>
@@ -993,6 +1032,7 @@
     const APP_VERSION = '1.1.1';
     const CARDS_PER_PAGE = 8;
     const DECK_VERSION = 1;
+    const DEFAULT_DECK_NAME = '未命名牌組';
     const cards = [];
     let nextId = 1;
     let currentDeckPath = null;
@@ -1001,6 +1041,7 @@
     const previewGrid = document.getElementById('previewGrid');
     const emptyHint = document.getElementById('emptyHint');
     const cardCountBadge = document.getElementById('cardCountBadge');
+    const deckNameInput = document.getElementById('deckNameInput');
     const btnPreview = document.getElementById('btnPreview');
     const btnPrint = document.getElementById('btnPrint');
     const btnPdf = document.getElementById('btnPdf');
@@ -1045,12 +1086,34 @@
       URL.revokeObjectURL(url);
     }
 
+    function getDeckDisplayName() {
+      const trimmed = deckNameInput.value.trim();
+      return trimmed || DEFAULT_DECK_NAME;
+    }
+
+    function getDeckFileName() {
+      const base = getDeckDisplayName()
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim() || DEFAULT_DECK_NAME;
+      return base.toLowerCase().endsWith('.ptcgdeck') ? base : `${base}.ptcgdeck`;
+    }
+
+    function setDeckName(name) {
+      deckNameInput.value = (name && String(name).trim()) || DEFAULT_DECK_NAME;
+    }
+
+    function deckNameFromFilePath(filePath) {
+      if (!filePath) return DEFAULT_DECK_NAME;
+      const base = filePath.split(/[/\\]/).pop() || '';
+      return base.replace(/\.(ptcgdeck|json)$/i, '') || DEFAULT_DECK_NAME;
+    }
+
     async function saveDeckFile(deckData) {
+      const filename = getDeckFileName();
       if (isElectron) {
-        return ipcRenderer.invoke('save-deck', deckData);
+        return ipcRenderer.invoke('save-deck', deckData, filename);
       }
-      const name = currentDeckPath || 'my-deck.ptcgdeck';
-      const filename = name.includes('.') ? name.split('/').pop() : name;
       downloadFile(filename, JSON.stringify(deckData, null, 2), 'application/json');
       return { ok: true, filePath: filename };
     }
@@ -1190,8 +1253,8 @@
         : '共 0 張';
       cardCountBadge.classList.toggle('is-empty', totalQty === 0);
       deckStatus.textContent = currentDeckPath
-        ? currentDeckPath.split('/').pop()
-        : (hasCards ? '未儲存的牌組' : '');
+        ? `已儲存：${getDeckDisplayName()}`
+        : (hasCards ? '未儲存' : '');
     }
 
     function setImportStatus(message, tone = '') {
@@ -1776,24 +1839,6 @@
       lightboxImg.src = '';
     }
 
-    // #region agent log
-    function debugDragLog(hypothesisId, location, message, data) {
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '40b010' },
-        body: JSON.stringify({
-          sessionId: '40b010',
-          runId: 'pre-fix',
-          hypothesisId,
-          location,
-          message,
-          data,
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
-
     function isCardDragBlockedTarget(target) {
       return Boolean(target.closest('button, input, .qty-group, .btn-delete, .preview-card-controls'));
     }
@@ -1801,9 +1846,6 @@
     function reorderCards(fromId, toId) {
       const fromIdx = cards.findIndex((c) => c.id === fromId);
       const toIdx = cards.findIndex((c) => c.id === toId);
-      // #region agent log
-      debugDragLog('E', 'index.html:reorderCards', 'reorder attempt', { fromId, toId, fromIdx, toIdx });
-      // #endregion
       if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
       const [moved] = cards.splice(fromIdx, 1);
       cards.splice(toIdx, 0, moved);
@@ -1860,9 +1902,6 @@
     function finishPointerReorder() {
       if (!pointerReorder) return;
       const { cardEl, hoverId, id, active, pointerId } = pointerReorder;
-      // #region agent log
-      debugDragLog('E', 'index.html:finishPointerReorder', 'pointer reorder end', { id, hoverId, active });
-      // #endregion
       cardEl.classList.remove('is-dragging');
       try { cardEl.releasePointerCapture(pointerId); } catch (_) {}
       if (active && hoverId) {
@@ -1879,15 +1918,6 @@
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const card = e.target.closest('.preview-card');
       const blocked = isCardDragBlockedTarget(e.target);
-      // #region agent log
-      debugDragLog('F', 'index.html:pointerdown', 'pointerdown on card grid', {
-        tag: e.target.tagName,
-        hasCard: Boolean(card),
-        blocked,
-        cardId: card ? Number(card.dataset.id) : null,
-        pointerType: e.pointerType,
-      });
-      // #endregion
       if (!card || blocked) return;
       pointerReorder = {
         id: Number(card.dataset.id),
@@ -1909,9 +1939,6 @@
         if (Math.hypot(dx, dy) < CARD_DRAG_THRESHOLD) return;
         pointerReorder.active = true;
         pointerReorder.cardEl.classList.add('is-dragging');
-        // #region agent log
-        debugDragLog('F', 'index.html:pointermove', 'drag activated', { cardId: pointerReorder.id, dx, dy });
-        // #endregion
       }
       e.preventDefault();
       updatePointerReorderHover(e.clientX, e.clientY);
@@ -2063,6 +2090,7 @@
     function getDeckData() {
       return {
         version: DECK_VERSION,
+        name: getDeckDisplayName(),
         savedAt: new Date().toISOString(),
         cards: cards.map(({ name, src, quantity }) => ({ name, src, quantity })),
       };
@@ -2072,6 +2100,7 @@
       cards.length = 0;
       nextId = 1;
       currentDeckPath = null;
+      setDeckName(DEFAULT_DECK_NAME);
       previewGrid.innerHTML = '';
       printRoot.innerHTML = '';
       closePreview();
@@ -2093,9 +2122,15 @@
           quantity: Math.max(0, Math.min(999, Number(item.quantity) || 1)),
         });
       }
+      setDeckName(deckData.name || DEFAULT_DECK_NAME);
       renderPreview();
       updateUI();
     }
+
+    deckNameInput.addEventListener('input', () => {
+      currentDeckPath = null;
+      updateUI();
+    });
 
     btnPreview.addEventListener('click', openPreview);
 
@@ -2241,6 +2276,9 @@
       try {
         loadDeckData(result.deckData);
         currentDeckPath = result.filePath;
+        if (!result.deckData.name) {
+          setDeckName(deckNameFromFilePath(result.filePath));
+        }
         updateUI();
       } catch (err) {
         alert('無法開啟牌組：' + err.message);

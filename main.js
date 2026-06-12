@@ -28,10 +28,10 @@ function createWindow() {
   win.loadFile('index.html');
 }
 
-ipcMain.handle('save-deck', async (_event, deckData) => {
+ipcMain.handle('save-deck', async (_event, deckData, suggestedName) => {
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: '儲存牌組',
-    defaultPath: 'my-deck.ptcgdeck',
+    defaultPath: suggestedName || '未命名牌組.ptcgdeck',
     filters: [{ name: 'PTCG Deck', extensions: ['ptcgdeck'] }],
   });
   if (canceled || !filePath) return { ok: false };
