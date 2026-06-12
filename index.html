@@ -258,14 +258,6 @@
       box-shadow: 0 0 0 2px var(--accent);
     }
 
-    .preview-card.is-drag-over-before {
-      box-shadow: inset 0 3px 0 0 var(--accent), 0 0 0 2px var(--accent);
-    }
-
-    .preview-card.is-drag-over-after {
-      box-shadow: inset 0 -3px 0 0 var(--accent), 0 0 0 2px var(--accent);
-    }
-
     .preview-card.is-drag-ready {
       box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.55);
     }
@@ -1894,14 +1886,12 @@
       return !isCardDragBlockedTarget(target);
     }
 
-    function reorderCardsToPosition(fromId, toId, insertAfter) {
+    function reorderCardsToTarget(fromId, toId) {
       const fromIdx = cards.findIndex((c) => c.id === fromId);
       const toIdx = cards.findIndex((c) => c.id === toId);
       if (fromIdx < 0 || toIdx < 0 || fromId === toId) return;
-      let insertIdx = insertAfter ? toIdx + 1 : toIdx;
       const [moved] = cards.splice(fromIdx, 1);
-      if (fromIdx < insertIdx) insertIdx -= 1;
-      cards.splice(insertIdx, 0, moved);
+      cards.splice(toIdx, 0, moved);
       currentDeckPath = null;
       renderPreview();
       updateUI();
@@ -1922,18 +1912,12 @@
       if (!targetCard) return null;
       const targetId = Number(targetCard.dataset.id);
       if (targetId === dragId) return null;
-      const rect = targetCard.getBoundingClientRect();
-      const dragRect = draggingEl?.getBoundingClientRect();
-      const sameRow = dragRect && Math.abs(dragRect.top - rect.top) < Math.min(dragRect.height, rect.height) * 0.55;
-      const insertAfter = sameRow
-        ? clientX > rect.left + rect.width / 2
-        : clientY > rect.top + rect.height / 2;
-      return { targetId, insertAfter };
+      return { targetId };
     }
 
     function clearCardDragOverState() {
       previewGrid.querySelectorAll('.preview-card').forEach((el) => {
-        el.classList.remove('is-drag-over', 'is-drag-over-before', 'is-drag-over-after', 'is-drag-ready');
+        el.classList.remove('is-drag-over', 'is-drag-ready');
       });
     }
 
@@ -1960,6 +1944,7 @@
     const MOUSE_DRAG_THRESHOLD = 8;
     const TOUCH_HOLD_MS = 360;
     const TOUCH_HOLD_CANCEL_PX = 14;
+    const previewSection = document.querySelector('.preview-section');
 
     function isTouchPointerType(type) {
       return type === 'touch';
@@ -1972,21 +1957,66 @@
       }
     }
 
+    function setScrollLocked(locked) {
+      document.body.style.overflow = locked ? 'hidden' : '';
+      document.documentElement.style.overflow = locked ? 'hidden' : '';
+      if (previewSection) previewSection.style.overflow = locked ? 'hidden' : '';
+    }
+
+    function onGlobalPointerMove(e) {
+      if (!pointerReorder?.active || pointerReorder.pointerId !== e.pointerId) return;
+      pointerReorder.lastX = e.clientX;
+      pointerReorder.lastY = e.clientY;
+      e.preventDefault();
+      updatePointerReorderHover(e.clientX, e.clientY);
+    }
+
+    function onGlobalPointerEnd(e) {
+      if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+      finishPointerReorder(e);
+    }
+
+    function attachGlobalDragListeners() {
+      window.addEventListener('pointermove', onGlobalPointerMove, { passive: false });
+      window.addEventListener('pointerup', onGlobalPointerEnd);
+      window.addEventListener('pointercancel', onGlobalPointerEnd);
+    }
+
+    function detachGlobalDragListeners() {
+      window.removeEventListener('pointermove', onGlobalPointerMove);
+      window.removeEventListener('pointerup', onGlobalPointerEnd);
+      window.removeEventListener('pointercancel', onGlobalPointerEnd);
+    }
+
+    function endPointerReorderSession() {
+      detachGlobalDragListeners();
+      setScrollLocked(false);
+    }
+
+    function activatePointerDrag() {
+      if (!pointerReorder || pointerReorder.active) return;
+      pointerReorder.active = true;
+      pointerReorder.cardEl.classList.add('is-dragging');
+      if (pointerReorder.isTouch) {
+        pointerReorder.cardEl.classList.add('is-drag-ready');
+        setScrollLocked(true);
+      }
+      attachGlobalDragListeners();
+      updatePointerReorderHover(pointerReorder.lastX, pointerReorder.lastY);
+    }
+
     function updatePointerReorderHover(clientX, clientY) {
       if (!pointerReorder?.active) return;
       const drop = computeDropTarget(clientX, clientY, pointerReorder.id);
       previewGrid.querySelectorAll('.preview-card').forEach((el) => {
-        el.classList.remove('is-drag-over', 'is-drag-over-before', 'is-drag-over-after');
+        el.classList.remove('is-drag-over');
       });
       if (!drop) {
         pointerReorder.dropTarget = null;
         return;
       }
       const targetEl = previewGrid.querySelector(`.preview-card[data-id="${drop.targetId}"]`);
-      if (targetEl) {
-        targetEl.classList.add('is-drag-over');
-        targetEl.classList.add(drop.insertAfter ? 'is-drag-over-after' : 'is-drag-over-before');
-      }
+      if (targetEl) targetEl.classList.add('is-drag-over');
       pointerReorder.dropTarget = drop;
     }
 
@@ -1996,6 +2026,7 @@
       pointerReorder.cardEl.classList.remove('is-dragging', 'is-drag-ready');
       try { pointerReorder.cardEl.releasePointerCapture(pointerReorder.pointerId); } catch (_) {}
       pointerReorder = null;
+      endPointerReorderSession();
       clearCardDragOverState();
     }
 
@@ -2006,6 +2037,7 @@
       cardEl.classList.remove('is-dragging', 'is-drag-ready');
       try { cardEl.releasePointerCapture(pointerId); } catch (_) {}
       pointerReorder = null;
+      endPointerReorderSession();
 
       let drop = null;
       if (active) {
@@ -2017,7 +2049,7 @@
         }
       }
       if (active && drop) {
-        reorderCardsToPosition(id, drop.targetId, drop.insertAfter);
+        reorderCardsToTarget(id, drop.targetId);
         cardDragDidMove = true;
         setTimeout(() => { cardDragDidMove = false; }, 300);
       } else {
@@ -2053,10 +2085,8 @@
       if (isTouch) {
         dragHoldTimer = setTimeout(() => {
           if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
-          pointerReorder.active = true;
           pointerReorder.holdDone = true;
-          pointerReorder.cardEl.classList.add('is-dragging', 'is-drag-ready');
-          updatePointerReorderHover(pointerReorder.lastX, pointerReorder.lastY);
+          activatePointerDrag();
         }, TOUCH_HOLD_MS);
       }
       try { card.setPointerCapture(e.pointerId); } catch (_) {}
@@ -2079,21 +2109,27 @@
         } else if (Math.hypot(dx, dy) < MOUSE_DRAG_THRESHOLD) {
           return;
         } else {
-          pointerReorder.active = true;
-          pointerReorder.cardEl.classList.add('is-dragging');
+          activatePointerDrag();
         }
       }
-      e.preventDefault();
-      updatePointerReorderHover(e.clientX, e.clientY);
     }, { passive: false });
 
     previewGrid.addEventListener('pointerup', (e) => {
       if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+      if (!pointerReorder.active) {
+        clearDragHoldTimer();
+        pointerReorder = null;
+        return;
+      }
       finishPointerReorder(e);
     });
 
     previewGrid.addEventListener('pointercancel', (e) => {
       if (!pointerReorder || pointerReorder.pointerId !== e.pointerId) return;
+      if (!pointerReorder.active) {
+        cancelPointerReorder();
+        return;
+      }
       finishPointerReorder(e);
     });
 
