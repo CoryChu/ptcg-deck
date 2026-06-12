@@ -40,6 +40,10 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
+      min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
     }
@@ -171,6 +175,7 @@
 
     .preview-section {
       flex: 1;
+      min-height: 0;
       padding: 0 1.5rem 1.5rem;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
@@ -1986,8 +1991,8 @@
     const TOUCH_HOLD_MS = 360;
     const TOUCH_HOLD_CANCEL_PX = 14;
     const previewSection = document.querySelector('.preview-section');
-    const DRAG_EDGE_ZONE_PX = 56;
-    const DRAG_MAX_SCROLL_SPEED = 16;
+    const DRAG_EDGE_ZONE_PX = 72;
+    const DRAG_MAX_SCROLL_SPEED = 22;
     let dragScrollRaf = null;
 
     function isTouchPointerType(type) {
@@ -2003,16 +2008,30 @@
 
     function updateDragAutoScroll(clientY) {
       if (!previewSection || !pointerReorder?.active) return;
-      const rect = previewSection.getBoundingClientRect();
       const maxScroll = previewSection.scrollHeight - previewSection.clientHeight;
+      const viewH = window.innerHeight;
+      // #region agent log
+      if (!pointerReorder._scrollLogAt || Date.now() - pointerReorder._scrollLogAt > 400) {
+        pointerReorder._scrollLogAt = Date.now();
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'post-fix',hypothesisId:'A',location:'index.html:updateDragAutoScroll',message:'auto-scroll metrics',data:{clientY,maxScroll,scrollTop:previewSection.scrollTop,scrollHeight:previewSection.scrollHeight,clientHeight:previewSection.clientHeight,viewH,loopActive:!!dragScrollRaf},timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
       if (maxScroll <= 0) return;
 
-      if (clientY < rect.top + DRAG_EDGE_ZONE_PX) {
-        const t = 1 - Math.max(0, clientY - rect.top) / DRAG_EDGE_ZONE_PX;
-        previewSection.scrollTop -= Math.ceil(DRAG_MAX_SCROLL_SPEED * t);
-      } else if (clientY > rect.bottom - DRAG_EDGE_ZONE_PX) {
-        const t = 1 - Math.max(0, rect.bottom - clientY) / DRAG_EDGE_ZONE_PX;
-        previewSection.scrollTop += Math.ceil(DRAG_MAX_SCROLL_SPEED * t);
+      let delta = 0;
+      if (clientY < DRAG_EDGE_ZONE_PX) {
+        const t = 1 - Math.max(0, clientY) / DRAG_EDGE_ZONE_PX;
+        delta = -Math.ceil(DRAG_MAX_SCROLL_SPEED * t);
+      } else if (clientY > viewH - DRAG_EDGE_ZONE_PX) {
+        const t = 1 - Math.max(0, viewH - clientY) / DRAG_EDGE_ZONE_PX;
+        delta = Math.ceil(DRAG_MAX_SCROLL_SPEED * t);
+      }
+      if (delta) {
+        const before = previewSection.scrollTop;
+        previewSection.scrollTop = Math.max(0, Math.min(maxScroll, previewSection.scrollTop + delta));
+        // #region agent log
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'verify',hypothesisId:'B',location:'index.html:updateDragAutoScroll',message:'scroll applied',data:{clientY,delta,before,after:previewSection.scrollTop,maxScroll},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
       }
     }
 
@@ -2027,6 +2046,9 @@
     }
 
     function startDragScrollLoop() {
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'post-fix',hypothesisId:'D',location:'index.html:startDragScrollLoop',message:'drag scroll loop started',data:{hadRaf:!!dragScrollRaf},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!dragScrollRaf) dragScrollRaf = requestAnimationFrame(dragScrollTick);
     }
 
@@ -2062,6 +2084,11 @@
     function onGlobalTouchMove(e) {
       if (!pointerReorder?.active || !pointerReorder.isTouch) return;
       e.preventDefault();
+      const t = e.touches?.[0] || e.changedTouches?.[0];
+      if (t) {
+        pointerReorder.lastX = t.clientX;
+        pointerReorder.lastY = t.clientY;
+      }
     }
 
     function onGlobalPointerUp(e) {
@@ -2102,6 +2129,10 @@
 
     function activatePointerDrag() {
       if (!pointerReorder || pointerReorder.active) return;
+      const maxScroll = previewSection ? previewSection.scrollHeight - previewSection.clientHeight : -1;
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',runId:'verify',hypothesisId:'E',location:'index.html:activatePointerDrag',message:'drag activated',data:{isTouch:pointerReorder.isTouch,maxScroll,scrollHeight:previewSection?.scrollHeight,clientHeight:previewSection?.clientHeight},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       pointerReorder.active = true;
       pointerReorder.cardEl.classList.add('is-dragging');
       if (pointerReorder.isTouch) {
