@@ -1000,7 +1000,7 @@
   </header>
 
   <input type="file" id="fileInputImages" class="hidden-input" accept="image/*" multiple>
-  <input type="file" id="fileInputDeck" class="hidden-input" accept=".ptcgdeck,.json,application/json">
+  <input type="file" id="fileInputDeck" class="hidden-input" accept="*/*">
 
   <div id="dropZone" class="drop-zone">
     <strong>拖放或點擊選擇卡牌圖片</strong>
@@ -1156,7 +1156,20 @@
     function deckNameFromFilePath(filePath) {
       if (!filePath) return DEFAULT_DECK_NAME;
       const base = filePath.split(/[/\\]/).pop() || '';
-      return base.replace(/\.(ptcgdeck|json)$/i, '') || DEFAULT_DECK_NAME;
+      return base.replace(/\.[^.]+$/, '') || DEFAULT_DECK_NAME;
+    }
+
+    function parseDeckFileText(text) {
+      let deckData;
+      try {
+        deckData = JSON.parse(text);
+      } catch {
+        throw new Error('無效的牌組檔案（不是有效的 JSON）');
+      }
+      if (!deckData || !Array.isArray(deckData.cards)) {
+        throw new Error('無效的牌組檔案格式');
+      }
+      return deckData;
     }
 
     async function saveDeckFile(deckData) {
@@ -1183,10 +1196,10 @@
           const reader = new FileReader();
           reader.onload = (e) => {
             try {
-              const deckData = JSON.parse(e.target.result);
+              const deckData = parseDeckFileText(e.target.result);
               resolve({ ok: true, filePath: file.name, deckData });
-            } catch {
-              resolve({ ok: false, error: '無效的牌組檔案' });
+            } catch (err) {
+              resolve({ ok: false, error: err.message || '無效的牌組檔案' });
             }
           };
           reader.onerror = () => resolve({ ok: false });

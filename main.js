@@ -43,14 +43,24 @@ ipcMain.handle('save-deck', async (_event, deckData, suggestedName) => {
 ipcMain.handle('open-deck', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: '開啟牌組',
-    filters: [{ name: 'PTCG Deck', extensions: ['ptcgdeck', 'json'] }],
+    filters: [
+      { name: 'PTCG Deck', extensions: ['ptcgdeck', 'json'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
     properties: ['openFile'],
   });
   if (canceled || filePaths.length === 0) return { ok: false };
 
-  const raw = fs.readFileSync(filePaths[0], 'utf-8');
-  const deckData = JSON.parse(raw);
-  return { ok: true, filePath: filePaths[0], deckData };
+  try {
+    const raw = fs.readFileSync(filePaths[0], 'utf-8');
+    const deckData = JSON.parse(raw);
+    if (!deckData || !Array.isArray(deckData.cards)) {
+      return { ok: false, error: '無效的牌組檔案格式' };
+    }
+    return { ok: true, filePath: filePaths[0], deckData };
+  } catch {
+    return { ok: false, error: '無效的牌組檔案（不是有效的 JSON）' };
+  }
 });
 
 function detectImageMime(buffer) {
