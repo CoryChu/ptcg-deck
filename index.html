@@ -216,6 +216,39 @@
       overflow: hidden;
     }
 
+    .preview-card.is-dragging {
+      opacity: 0.45;
+    }
+
+    .preview-card.is-drag-over {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    .preview-card-drag-handle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 0.22rem 0;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--muted);
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      line-height: 1;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .preview-card-drag-handle:active {
+      cursor: grabbing;
+      color: var(--accent);
+    }
+
     .preview-card-img {
       width: 100%;
       aspect-ratio: 63 / 88;
@@ -1756,9 +1789,27 @@
       lightboxImg.src = '';
     }
 
+    function reorderCards(fromId, toId) {
+      const fromIdx = cards.findIndex((c) => c.id === fromId);
+      const toIdx = cards.findIndex((c) => c.id === toId);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+      const [moved] = cards.splice(fromIdx, 1);
+      cards.splice(toIdx, 0, moved);
+      currentDeckPath = null;
+      renderPreview();
+      updateUI();
+    }
+
+    function clearCardDragOverState() {
+      previewGrid.querySelectorAll('.preview-card.is-drag-over').forEach((el) => {
+        el.classList.remove('is-drag-over');
+      });
+    }
+
     function renderPreview() {
       previewGrid.innerHTML = cards.map(card => `
-        <div class="preview-card" data-id="${card.id}">
+        <div class="preview-card" data-id="${card.id}" draggable="true">
+          <button type="button" class="preview-card-drag-handle" aria-label="拖曳以調整順序" title="拖曳以調整順序">⋮⋮</button>
           <img class="preview-card-img" src="${card.src}" alt="${card.name}" data-action="view" data-id="${card.id}">
           <div class="preview-card-controls">
             <div class="qty-group">
@@ -1773,6 +1824,108 @@
     }
 
     let lastQtyTouchAt = 0;
+    let draggingCardId = null;
+    let touchReorder = null;
+
+    previewGrid.addEventListener('dragstart', (e) => {
+      const card = e.target.closest('.preview-card');
+      if (!card || !e.target.closest('.preview-card-drag-handle')) {
+        e.preventDefault();
+        return;
+      }
+      draggingCardId = Number(card.dataset.id);
+      card.classList.add('is-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(draggingCardId));
+    });
+
+    previewGrid.addEventListener('dragend', (e) => {
+      const card = e.target.closest('.preview-card');
+      if (card) card.classList.remove('is-dragging');
+      clearCardDragOverState();
+      draggingCardId = null;
+    });
+
+    previewGrid.addEventListener('dragover', (e) => {
+      if (!draggingCardId) return;
+      const card = e.target.closest('.preview-card');
+      if (!card) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const targetId = Number(card.dataset.id);
+      if (targetId === draggingCardId) return;
+      clearCardDragOverState();
+      card.classList.add('is-drag-over');
+    });
+
+    previewGrid.addEventListener('dragleave', (e) => {
+      const card = e.target.closest('.preview-card');
+      if (!card) return;
+      const related = e.relatedTarget;
+      if (!related || !card.contains(related)) {
+        card.classList.remove('is-drag-over');
+      }
+    });
+
+    previewGrid.addEventListener('drop', (e) => {
+      if (!draggingCardId) return;
+      e.preventDefault();
+      const card = e.target.closest('.preview-card');
+      if (!card) return;
+      const targetId = Number(card.dataset.id);
+      card.classList.remove('is-drag-over');
+      if (targetId !== draggingCardId) {
+        reorderCards(draggingCardId, targetId);
+      }
+      draggingCardId = null;
+    });
+
+    previewGrid.addEventListener('touchstart', (e) => {
+      const handle = e.target.closest('.preview-card-drag-handle');
+      if (!handle) return;
+      const card = handle.closest('.preview-card');
+      if (!card) return;
+      touchReorder = {
+        id: Number(card.dataset.id),
+        cardEl: card,
+        hoverId: null,
+      };
+      card.classList.add('is-dragging');
+    }, { passive: true });
+
+    previewGrid.addEventListener('touchmove', (e) => {
+      if (!touchReorder) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      const hit = document.elementFromPoint(touch.clientX, touch.clientY);
+      const targetCard = hit?.closest('.preview-card');
+      clearCardDragOverState();
+      if (targetCard) {
+        const targetId = Number(targetCard.dataset.id);
+        if (targetId !== touchReorder.id) {
+          targetCard.classList.add('is-drag-over');
+          touchReorder.hoverId = targetId;
+        } else {
+          touchReorder.hoverId = null;
+        }
+      } else {
+        touchReorder.hoverId = null;
+      }
+    }, { passive: false });
+
+    function finishTouchReorder() {
+      if (!touchReorder) return;
+      touchReorder.cardEl.classList.remove('is-dragging');
+      if (touchReorder.hoverId) {
+        reorderCards(touchReorder.id, touchReorder.hoverId);
+      } else {
+        clearCardDragOverState();
+      }
+      touchReorder = null;
+    }
+
+    previewGrid.addEventListener('touchend', finishTouchReorder);
+    previewGrid.addEventListener('touchcancel', finishTouchReorder);
 
     function adjustCardQuantity(card, action) {
       if (action === 'inc') {
