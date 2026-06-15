@@ -25,14 +25,12 @@
       --card-h: 88mm;
       --page-w: 297mm;
       --page-h: 210mm;
-      --grid-offset-top: 12mm;
-      --grid-offset-left: 12mm;
-      --col-gap: 8mm;
-      --row-gap: 10mm;
-      --crop-color: #a1a1aa;
-      --crop-offset: 2mm;
-      --crop-length: 4mm;
-      --crop-thickness: 0.2mm;
+      --grid-cols: 3;
+      --grid-rows: 3;
+      --grid-offset-top: 0mm;
+      --grid-offset-left: calc((var(--page-w) - var(--card-w) * var(--grid-cols)) / 2);
+      --col-gap: 0mm;
+      --row-gap: 0mm;
     }
 
     body {
@@ -619,10 +617,10 @@
       top: var(--grid-offset-top);
       left: var(--grid-offset-left);
       display: grid;
-      grid-template-columns: repeat(4, 63mm);
-      grid-template-rows: repeat(2, 88mm);
-      column-gap: var(--col-gap);
-      row-gap: var(--row-gap);
+      grid-template-columns: repeat(3, 63mm);
+      grid-template-rows: repeat(3, 88mm);
+      column-gap: 0mm;
+      row-gap: 0mm;
     }
 
     #print-root .print-card,
@@ -630,7 +628,9 @@
       position: relative;
       width: var(--card-w);
       height: var(--card-h);
-      overflow: visible;
+      box-sizing: border-box;
+      border: 0.2mm solid #d1d5db;
+      overflow: hidden;
     }
 
     #print-root .print-card img,
@@ -643,70 +643,6 @@
       image-rendering: crisp-edges;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
-    }
-
-    #print-root .print-card .mark,
-    .preview-pages .print-card .mark {
-      position: absolute;
-      background: var(--crop-color);
-      pointer-events: none;
-    }
-
-    #print-root .print-card .mark-tl-h,
-    .preview-pages .print-card .mark-tl-h {
-      top: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      left: calc(-1 * var(--crop-offset) - var(--crop-length));
-      width: var(--crop-length);
-      height: var(--crop-thickness);
-    }
-    #print-root .print-card .mark-tl-v,
-    .preview-pages .print-card .mark-tl-v {
-      top: calc(-1 * var(--crop-offset) - var(--crop-length));
-      left: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      width: var(--crop-thickness);
-      height: var(--crop-length);
-    }
-    #print-root .print-card .mark-tr-h,
-    .preview-pages .print-card .mark-tr-h {
-      top: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      right: calc(-1 * var(--crop-offset) - var(--crop-length));
-      width: var(--crop-length);
-      height: var(--crop-thickness);
-    }
-    #print-root .print-card .mark-tr-v,
-    .preview-pages .print-card .mark-tr-v {
-      top: calc(-1 * var(--crop-offset) - var(--crop-length));
-      right: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      width: var(--crop-thickness);
-      height: var(--crop-length);
-    }
-    #print-root .print-card .mark-bl-h,
-    .preview-pages .print-card .mark-bl-h {
-      bottom: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      left: calc(-1 * var(--crop-offset) - var(--crop-length));
-      width: var(--crop-length);
-      height: var(--crop-thickness);
-    }
-    #print-root .print-card .mark-bl-v,
-    .preview-pages .print-card .mark-bl-v {
-      bottom: calc(-1 * var(--crop-offset) - var(--crop-length));
-      left: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      width: var(--crop-thickness);
-      height: var(--crop-length);
-    }
-    #print-root .print-card .mark-br-h,
-    .preview-pages .print-card .mark-br-h {
-      bottom: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      right: calc(-1 * var(--crop-offset) - var(--crop-length));
-      width: var(--crop-length);
-      height: var(--crop-thickness);
-    }
-    #print-root .print-card .mark-br-v,
-    .preview-pages .print-card .mark-br-v {
-      bottom: calc(-1 * var(--crop-offset) - var(--crop-length));
-      right: calc(-1 * var(--crop-offset) - var(--crop-thickness));
-      width: var(--crop-thickness);
-      height: var(--crop-length);
     }
 
     /* ── 排版預覽視窗 ── */
@@ -966,6 +902,20 @@
       #print-root .print-page:last-child {
         page-break-after: auto;
       }
+
+      #print-root .grid-container {
+        grid-template-columns: repeat(3, 63mm);
+        grid-template-rows: repeat(3, 88mm);
+        column-gap: 0mm;
+        row-gap: 0mm;
+      }
+
+      #print-root .print-card {
+        width: 63mm;
+        height: 88mm;
+        box-sizing: border-box;
+        border: 0.2mm solid #d1d5db;
+      }
     }
   </style>
 </head>
@@ -1080,7 +1030,7 @@
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
     const APP_VERSION = '1.2.1';
-    const CARDS_PER_PAGE = 8;
+    const CARDS_PER_PAGE = 9;
     const DECK_VERSION = 1;
     const DEFAULT_DECK_NAME = '未命名牌組';
     const cards = [];
@@ -1212,28 +1162,19 @@
     const PDF_LAYOUT = {
       pageW: 297,
       pageH: 210,
-      marginL: 12,
-      marginT: 12,
+      marginL: 54,
+      marginT: 0,
       cardW: 63,
       cardH: 88,
-      colGap: 8,
-      rowGap: 10,
-      cols: 4,
+      colGap: 0,
+      rowGap: 0,
+      cols: 3,
     };
 
-    function drawCropMarks(pdf, x, y, w, h) {
-      const offset = 2;
-      const len = 4;
-      pdf.setDrawColor(161, 161, 170);
+    function drawCardBorder(pdf, x, y, w, h) {
+      pdf.setDrawColor(209, 213, 219);
       pdf.setLineWidth(0.2);
-      pdf.line(x - offset - len, y - offset, x - offset, y - offset);
-      pdf.line(x - offset, y - offset - len, x - offset, y - offset);
-      pdf.line(x + w + offset, y - offset, x + w + offset + len, y - offset);
-      pdf.line(x + w + offset, y - offset - len, x + w + offset, y - offset);
-      pdf.line(x - offset - len, y + h + offset, x - offset, y + h + offset);
-      pdf.line(x - offset, y + h + offset, x - offset, y + h + offset + len);
-      pdf.line(x + w + offset, y + h + offset, x + w + offset + len, y + h + offset);
-      pdf.line(x + w + offset, y + h + offset, x + w + offset, y + h + offset + len);
+      pdf.rect(x, y, w, h);
     }
 
     function imageFormatForPdf(dataUrl) {
@@ -1284,7 +1225,7 @@
         const imgData = await ensurePdfImageData(flatCards[i].src);
         const format = imageFormatForPdf(imgData);
         pdf.addImage(imgData, format, x, y, L.cardW, L.cardH);
-        drawCropMarks(pdf, x, y, L.cardW, L.cardH);
+        drawCardBorder(pdf, x, y, L.cardW, L.cardH);
       }
 
       if (isElectron) {
@@ -2332,17 +2273,7 @@
     function createCardElement(card) {
       const el = document.createElement('div');
       el.className = 'print-card';
-      el.innerHTML = `
-        <span class="mark mark-tl-h"></span>
-        <span class="mark mark-tl-v"></span>
-        <span class="mark mark-tr-h"></span>
-        <span class="mark mark-tr-v"></span>
-        <span class="mark mark-bl-h"></span>
-        <span class="mark mark-bl-v"></span>
-        <span class="mark mark-br-h"></span>
-        <span class="mark mark-br-v"></span>
-        <img src="${card.src}" alt="">
-      `;
+      el.innerHTML = `<img src="${card.src}" alt="">`;
       return el;
     }
 
