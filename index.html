@@ -23,12 +23,12 @@
       --danger: #ef4444;
       --card-w: 63mm;
       --card-h: 88mm;
-      --page-w: 297mm;
-      --page-h: 210mm;
+      --page-w: 210mm;
+      --page-h: 297mm;
       --grid-cols: 3;
       --grid-rows: 3;
-      --grid-offset-top: 0mm;
-      --grid-offset-left: calc((var(--page-w) - var(--card-w) * var(--grid-cols)) / 2);
+      --grid-offset-top: 16.5mm;
+      --grid-offset-left: 10.5mm;
       --col-gap: 0mm;
       --row-gap: 0mm;
     }
@@ -600,7 +600,7 @@
     /* ── Print layout (hidden on screen) ── */
     #print-root { display: none; }
 
-    /* 列印與預覽共用 A4 橫向排版 */
+    /* 列印與預覽共用 A4 直向排版 */
     #print-root .print-page,
     .preview-pages .print-page {
       position: relative;
@@ -629,7 +629,7 @@
       width: var(--card-w);
       height: var(--card-h);
       box-sizing: border-box;
-      border: 0.2mm solid #d1d5db;
+      border: 0.2mm solid #cbd5e1;
       overflow: hidden;
     }
 
@@ -883,7 +883,7 @@
       #print-root { display: block !important; }
 
       @page {
-        size: A4 landscape;
+        size: A4 portrait;
         margin: 0;
       }
 
@@ -904,6 +904,9 @@
       }
 
       #print-root .grid-container {
+        position: absolute;
+        top: 16.5mm;
+        left: 10.5mm;
         grid-template-columns: repeat(3, 63mm);
         grid-template-rows: repeat(3, 88mm);
         column-gap: 0mm;
@@ -914,7 +917,7 @@
         width: 63mm;
         height: 88mm;
         box-sizing: border-box;
-        border: 0.2mm solid #d1d5db;
+        border: 0.2mm solid #cbd5e1;
       }
     }
   </style>
@@ -1160,10 +1163,10 @@
     }
 
     const PDF_LAYOUT = {
-      pageW: 297,
-      pageH: 210,
-      marginL: 54,
-      marginT: 0,
+      pageW: 210,
+      pageH: 297,
+      marginL: 10.5,
+      marginT: 16.5,
       cardW: 63,
       cardH: 88,
       colGap: 0,
@@ -1172,7 +1175,7 @@
     };
 
     function drawCardBorder(pdf, x, y, w, h) {
-      pdf.setDrawColor(209, 213, 219);
+      pdf.setDrawColor(203, 213, 225);
       pdf.setLineWidth(0.2);
       pdf.rect(x, y, w, h);
     }
@@ -1213,8 +1216,8 @@
         const slot = i % CARDS_PER_PAGE;
 
         if (slot === 0) {
-          if (pdf) pdf.addPage([L.pageW, L.pageH], 'landscape');
-          else pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+          if (pdf) pdf.addPage([L.pageW, L.pageH], 'portrait');
+          else pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         }
 
         const col = slot % L.cols;
