@@ -42,7 +42,7 @@ ipcMain.handle('save-deck', async (_event, deckData, suggestedName) => {
 
 ipcMain.handle('open-deck', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: '開啟牌組',
+    title: '加入牌組',
     filters: [
       { name: 'PTCG Deck', extensions: ['ptcgdeck', 'json'] },
       { name: 'All Files', extensions: ['*'] },

@@ -987,7 +987,7 @@
           <span class="btn-text-full">Save Deck</span><span class="btn-text-short">儲存</span>
         </button>
         <button id="btnOpenDeck" class="btn btn-secondary">
-          <span class="btn-text-full">Open Deck</span><span class="btn-text-short">開啟</span>
+          <span class="btn-text-full">Add Deck</span><span class="btn-text-short">加入</span>
         </button>
         <button id="btnImportDeck" class="btn btn-secondary" type="button">
           <span class="btn-text-full">匯入 Deck</span><span class="btn-text-short">匯入</span>
@@ -2415,12 +2415,11 @@
       updateUI();
     }
 
-    function loadDeckData(deckData) {
+    function addDeckData(deckData) {
       if (!deckData || !Array.isArray(deckData.cards)) {
         throw new Error('無效的牌組檔案格式');
       }
-      cards.length = 0;
-      nextId = 1;
+      let added = 0;
       for (const item of deckData.cards) {
         if (!item.src) continue;
         cards.push({
@@ -2429,10 +2428,14 @@
           src: item.src,
           quantity: Math.max(0, Math.min(999, Number(item.quantity) || 1)),
         });
+        added += 1;
       }
-      setDeckName(deckData.name || DEFAULT_DECK_NAME);
+      if (added === 0) {
+        throw new Error('牌組檔案中沒有可加入的卡牌');
+      }
       renderPreview();
       updateUI();
+      return added;
     }
 
     deckNameInput.addEventListener('input', () => {
@@ -2582,14 +2585,12 @@
         return;
       }
       try {
-        loadDeckData(result.deckData);
-        currentDeckPath = result.filePath;
-        if (!result.deckData.name) {
-          setDeckName(deckNameFromFilePath(result.filePath));
-        }
+        const added = addDeckData(result.deckData);
+        const deckLabel = result.deckData.name || deckNameFromFilePath(result.filePath);
+        deckStatus.textContent = `已加入 ${added} 張卡牌（來自「${deckLabel}」）`;
         updateUI();
       } catch (err) {
-        alert('無法開啟牌組：' + err.message);
+        alert('無法加入牌組：' + err.message);
       }
     });
 
