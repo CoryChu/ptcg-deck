@@ -29,8 +29,8 @@
       --grid-rows: 3;
       --grid-offset-top: 16.5mm;
       --grid-offset-left: 10.5mm;
-      --grid-offset-top-back: 16.3mm;
-      --grid-offset-left-back: 11.3mm;
+      --grid-offset-top-back: 16.7mm;
+      --grid-offset-left-back: 9.7mm;
       --col-gap: 0mm;
       --row-gap: 0mm;
     }
@@ -1063,7 +1063,8 @@
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
     const GRID_OFFSET_LEFT_FRONT = '10.5mm';
-    const GRID_OFFSET_LEFT_BACK = '9.5mm';
+    const GRID_OFFSET_TOP_BACK = '16.3mm';
+    const GRID_OFFSET_LEFT_BACK = '11.3mm';
     const DECK_VERSION = 1;
     const DEFAULT_DECK_NAME = '未命名牌組';
     let doubleSidedPrint = false;
@@ -1199,8 +1200,9 @@
       pageW: 210,
       pageH: 297,
       marginL: 10.5,
-      marginLBack: 9.5,
+      marginLBack: 11.3,
       marginT: 16.5,
+      marginTBack: 16.3,
       cardW: 63,
       cardH: 88,
       colGap: 0,
@@ -1281,11 +1283,11 @@
         else pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       }
 
-      function drawCardAtSlot(imgData, format, slot, marginL = L.marginL) {
+      function drawCardAtSlot(imgData, format, slot, marginL = L.marginL, marginT = L.marginT) {
         const col = slot % L.cols;
         const row = Math.floor(slot / L.cols);
         const x = marginL + col * (L.cardW + L.colGap);
-        const y = L.marginT + row * (L.cardH + L.rowGap);
+        const y = marginT + row * (L.cardH + L.rowGap);
         pdf.addImage(imgData, format, x, y, L.cardW, L.cardH);
         drawCardBorder(pdf, x, y, L.cardW, L.cardH);
       }
@@ -1307,7 +1309,7 @@
           for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
             const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
             if (!pageCards[frontSlot]) continue;
-            drawCardAtSlot(backImgData, backFormat, backSlot, L.marginLBack);
+            drawCardAtSlot(backImgData, backFormat, backSlot, L.marginLBack, L.marginTBack);
           }
         }
       }
@@ -2412,7 +2414,7 @@
       const grid = document.createElement('div');
       grid.className = 'grid-container';
       grid.style.position = 'absolute';
-      grid.style.top = GRID_OFFSET_TOP;
+      grid.style.top = GRID_OFFSET_TOP_BACK;
       grid.style.left = GRID_OFFSET_LEFT_BACK;
 
       for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
