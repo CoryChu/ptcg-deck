@@ -680,6 +680,12 @@
       flex-wrap: wrap;
     }
 
+    .preview-toolbar-actions .btn.is-active {
+      border-color: var(--accent);
+      background: rgba(59, 130, 246, 0.2);
+      color: var(--text);
+    }
+
     .preview-scroll {
       flex: 1;
       overflow: auto;
@@ -1014,6 +1020,7 @@
     <div class="preview-toolbar">
       <span id="previewInfo">排版預覽</span>
       <div class="preview-toolbar-actions">
+        <button id="btnDoubleSided" class="btn btn-secondary" type="button">雙面列印</button>
         <button id="btnClosePreview" class="btn btn-secondary" type="button">關閉</button>
         <button id="btnPrint" class="btn btn-primary" type="button">列印</button>
         <button id="btnPdf" class="btn btn-primary" type="button">PDF</button>
@@ -1034,8 +1041,11 @@
 
     const APP_VERSION = '1.3';
     const CARDS_PER_PAGE = 9;
+    const CARD_BACK_SRC = 'assets/card-back.png';
     const DECK_VERSION = 1;
     const DEFAULT_DECK_NAME = '未命名牌組';
+    let doubleSidedPrint = false;
+    let lastPreviewStats = null;
     const cards = [];
     let nextId = 1;
     let currentDeckPath = null;
@@ -1046,6 +1056,7 @@
     const cardCountBadge = document.getElementById('cardCountBadge');
     const deckNameInput = document.getElementById('deckNameInput');
     const btnPreview = document.getElementById('btnPreview');
+    const btnDoubleSided = document.getElementById('btnDoubleSided');
     const btnPrint = document.getElementById('btnPrint');
     const btnPdf = document.getElementById('btnPdf');
     const btnSaveDeck = document.getElementById('btnSaveDeck');
@@ -1203,32 +1214,53 @@
       });
     }
 
-    async function downloadPdfWithJsPdf(flatCards) {
+    async function downloadPdfWithJsPdf(flatCards, options = {}) {
       if (!window.jspdf?.jsPDF) {
         throw new Error('jsPDF 未載入');
       }
 
+      const { includeBackPages = false } = options;
       const { jsPDF } = window.jspdf;
       const L = PDF_LAYOUT;
       let pdf = null;
+      const frontPageCount = Math.ceil(flatCards.length / CARDS_PER_PAGE);
+      let backImgData = null;
+      let backFormat = null;
 
-      for (let i = 0; i < flatCards.length; i++) {
-        const slot = i % CARDS_PER_PAGE;
+      if (includeBackPages) {
+        backImgData = await ensurePdfImageData(CARD_BACK_SRC);
+        backFormat = imageFormatForPdf(backImgData);
+      }
 
-        if (slot === 0) {
-          if (pdf) pdf.addPage([L.pageW, L.pageH], 'portrait');
-          else pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        }
+      function addPortraitPage() {
+        if (pdf) pdf.addPage([L.pageW, L.pageH], 'portrait');
+        else pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      }
 
+      function drawCardAtSlot(imgData, format, slot) {
         const col = slot % L.cols;
         const row = Math.floor(slot / L.cols);
         const x = L.marginL + col * (L.cardW + L.colGap);
         const y = L.marginT + row * (L.cardH + L.rowGap);
-
-        const imgData = await ensurePdfImageData(flatCards[i].src);
-        const format = imageFormatForPdf(imgData);
         pdf.addImage(imgData, format, x, y, L.cardW, L.cardH);
         drawCardBorder(pdf, x, y, L.cardW, L.cardH);
+      }
+
+      for (let p = 0; p < frontPageCount; p++) {
+        addPortraitPage();
+        const slice = flatCards.slice(p * CARDS_PER_PAGE, (p + 1) * CARDS_PER_PAGE);
+        for (let slot = 0; slot < slice.length; slot++) {
+          const imgData = await ensurePdfImageData(slice[slot].src);
+          const format = imageFormatForPdf(imgData);
+          drawCardAtSlot(imgData, format, slot);
+        }
+
+        if (includeBackPages) {
+          addPortraitPage();
+          for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
+            drawCardAtSlot(backImgData, backFormat, slot);
+          }
+        }
       }
 
       if (isElectron) {
@@ -1243,7 +1275,7 @@
     async function downloadPdf() {
       const flatCards = expandCards();
       if (flatCards.length === 0) return { ok: false };
-      return downloadPdfWithJsPdf(flatCards);
+      return downloadPdfWithJsPdf(flatCards, { includeBackPages: doubleSidedPrint });
     }
 
     function updateUI() {
@@ -2280,14 +2312,33 @@
       return el;
     }
 
-    function buildPrintLayout(target = printRoot) {
+    function createBackPageElement() {
+      const page = document.createElement('div');
+      page.className = 'print-page print-page-back';
+
+      const grid = document.createElement('div');
+      grid.className = 'grid-container';
+
+      for (let i = 0; i < CARDS_PER_PAGE; i++) {
+        const el = document.createElement('div');
+        el.className = 'print-card';
+        el.innerHTML = `<img src="${CARD_BACK_SRC}" alt="">`;
+        grid.appendChild(el);
+      }
+
+      page.appendChild(grid);
+      return page;
+    }
+
+    function buildPrintLayout(target = printRoot, options = {}) {
+      const { includeBackPages = false } = options;
       const flatCards = expandCards();
-      if (flatCards.length === 0) return false;
+      if (flatCards.length === 0) return { ok: false };
 
       target.innerHTML = '';
-      const pageCount = Math.ceil(flatCards.length / CARDS_PER_PAGE);
+      const frontPageCount = Math.ceil(flatCards.length / CARDS_PER_PAGE);
 
-      for (let p = 0; p < pageCount; p++) {
+      for (let p = 0; p < frontPageCount; p++) {
         const page = document.createElement('div');
         page.className = 'print-page';
 
@@ -2299,21 +2350,58 @@
 
         page.appendChild(grid);
         target.appendChild(page);
+
+        if (includeBackPages) {
+          target.appendChild(createBackPageElement());
+        }
       }
-      return { ok: true, pageCount, cardCount: flatCards.length };
+
+      const totalPages = includeBackPages ? frontPageCount * 2 : frontPageCount;
+      return {
+        ok: true,
+        pageCount: totalPages,
+        frontPageCount,
+        cardCount: flatCards.length,
+        includeBackPages,
+      };
+    }
+
+    function formatPreviewInfo(stats) {
+      if (!stats) return '排版預覽';
+      if (stats.includeBackPages) {
+        return `排版預覽 · 共 ${stats.pageCount} 頁（${stats.frontPageCount} 正 + ${stats.frontPageCount} 背）· ${stats.cardCount} 張卡牌 · 雙面列印`;
+      }
+      return `排版預覽 · 共 ${stats.pageCount} 頁 · ${stats.cardCount} 張卡牌`;
+    }
+
+    function updateDoubleSidedButton() {
+      btnDoubleSided.classList.toggle('is-active', doubleSidedPrint);
+      btnDoubleSided.setAttribute('aria-pressed', doubleSidedPrint ? 'true' : 'false');
+    }
+
+    async function rebuildPreviewLayout() {
+      const result = buildPrintLayout(previewRoot, { includeBackPages: doubleSidedPrint });
+      if (!result.ok) return null;
+      await waitForImages(previewRoot);
+      lastPreviewStats = result;
+      previewInfo.textContent = formatPreviewInfo(result);
+      updateDoubleSidedButton();
+      return result;
     }
 
     function closePreview() {
       previewOverlay.classList.remove('is-open');
       previewRoot.innerHTML = '';
+      doubleSidedPrint = false;
+      lastPreviewStats = null;
+      updateDoubleSidedButton();
     }
 
     async function openPreview() {
-      const result = buildPrintLayout(previewRoot);
+      doubleSidedPrint = false;
+      updateDoubleSidedButton();
+      const result = await rebuildPreviewLayout();
       if (!result) return;
-
-      await waitForImages(previewRoot);
-      previewInfo.textContent = `排版預覽 · 共 ${result.pageCount} 頁 · ${result.cardCount} 張卡牌`;
       previewOverlay.classList.add('is-open');
       document.querySelector('.preview-scroll').scrollTop = 0;
     }
@@ -2379,6 +2467,12 @@
 
     btnPreview.addEventListener('click', openPreview);
 
+    btnDoubleSided.addEventListener('click', async () => {
+      if (!previewOverlay.classList.contains('is-open')) return;
+      doubleSidedPrint = !doubleSidedPrint;
+      await rebuildPreviewLayout();
+    });
+
     btnClosePreview.addEventListener('click', closePreview);
 
     previewOverlay.addEventListener('click', (e) => {
@@ -2427,7 +2521,7 @@
     });
 
     btnPrint.addEventListener('click', async () => {
-      if (!buildPrintLayout(printRoot).ok) return;
+      if (!buildPrintLayout(printRoot, { includeBackPages: doubleSidedPrint }).ok) return;
       await waitForImages(printRoot);
       window.print();
     });
