@@ -1283,7 +1283,7 @@
           for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
             const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
             if (!pageCards[frontSlot]) continue;
-            drawCardAtSlot(backImgData, backFormat, backSlot);
+            drawCardAtSlot(backImgData, backFormat, backSlot, L.marginLBack);
           }
         }
       }
@@ -2387,6 +2387,9 @@
 
       const grid = document.createElement('div');
       grid.className = 'grid-container';
+      grid.style.position = 'absolute';
+      grid.style.top = GRID_OFFSET_TOP;
+      grid.style.left = GRID_OFFSET_LEFT_BACK;
 
       for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
         const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
