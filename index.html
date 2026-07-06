@@ -1255,17 +1255,21 @@
       for (let p = 0; p < frontPageCount; p++) {
         addPortraitPage();
         const slice = flatCards.slice(p * CARDS_PER_PAGE, (p + 1) * CARDS_PER_PAGE);
+        const pageCards = buildPageCards(slice);
+
         for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
-          if (!slice[slot]) continue;
-          const imgData = await ensurePdfImageData(slice[slot].src);
+          if (!pageCards[slot]) continue;
+          const imgData = await ensurePdfImageData(pageCards[slot].src);
           const format = imageFormatForPdf(imgData);
           drawCardAtSlot(imgData, format, slot);
         }
 
         if (includeBackPages) {
           addPortraitPage();
-          for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
-            drawCardAtSlot(backImgData, backFormat, slot);
+          for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
+            const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
+            if (!pageCards[frontSlot]) continue;
+            drawCardAtSlot(backImgData, backFormat, backSlot);
           }
         }
       }
@@ -2312,10 +2316,32 @@
       return expanded;
     }
 
+    function buildPageCards(flatSlice) {
+      const pageCards = new Array(CARDS_PER_PAGE).fill(null);
+      for (let slot = 0; slot < flatSlice.length && slot < CARDS_PER_PAGE; slot++) {
+        pageCards[slot] = flatSlice[slot] || null;
+      }
+      return pageCards;
+    }
+
+    /** 左右翻轉（翻長邊）時，背面 slot 對應的正面 slot（每行左右鏡像） */
+    function mirroredFrontSlotForBackSlot(backSlot) {
+      const row = Math.floor(backSlot / 3);
+      const col = backSlot % 3;
+      return row * 3 + (2 - col);
+    }
+
     function createCardElement(card) {
       const el = document.createElement('div');
       el.className = 'print-card';
       el.innerHTML = `<img src="${card.src}" alt="">`;
+      return el;
+    }
+
+    function createBackCardElement() {
+      const el = document.createElement('div');
+      el.className = 'print-card';
+      el.innerHTML = `<img src="${BACK_IMAGE_SRC}" alt="">`;
       return el;
     }
 
@@ -2326,7 +2352,7 @@
       return el;
     }
 
-    function createFrontPageElement(cardsOnPage) {
+    function createFrontPageElement(pageCards) {
       const page = document.createElement('div');
       page.className = 'print-page';
 
@@ -2334,25 +2360,23 @@
       grid.className = 'grid-container';
 
       for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
-        grid.appendChild(cardsOnPage[slot] ? createCardElement(cardsOnPage[slot]) : createEmptyCardSlot());
+        grid.appendChild(pageCards[slot] ? createCardElement(pageCards[slot]) : createEmptyCardSlot());
       }
 
       page.appendChild(grid);
       return page;
     }
 
-    function createBackPageElement() {
+    function createBackPageElement(pageCards) {
       const page = document.createElement('div');
       page.className = 'print-page print-page-back';
 
       const grid = document.createElement('div');
       grid.className = 'grid-container';
 
-      for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
-        const el = document.createElement('div');
-        el.className = 'print-card';
-        el.innerHTML = `<img src="${BACK_IMAGE_SRC}" alt="">`;
-        grid.appendChild(el);
+      for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
+        const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
+        grid.appendChild(pageCards[frontSlot] ? createBackCardElement() : createEmptyCardSlot());
       }
 
       page.appendChild(grid);
@@ -2369,10 +2393,12 @@
 
       for (let p = 0; p < frontPageCount; p++) {
         const slice = flatCards.slice(p * CARDS_PER_PAGE, (p + 1) * CARDS_PER_PAGE);
-        target.appendChild(createFrontPageElement(slice));
+        const pageCards = buildPageCards(slice);
+
+        target.appendChild(createFrontPageElement(pageCards));
 
         if (includeBackPages) {
-          target.appendChild(createBackPageElement());
+          target.appendChild(createBackPageElement(pageCards));
         }
       }
 
