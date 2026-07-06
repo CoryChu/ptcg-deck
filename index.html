@@ -1058,14 +1058,19 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.3.3';
+    const APP_VERSION = '1.3.4';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
     const GRID_OFFSET_LEFT_FRONT = '10.5mm';
-    /** 與 CSS --grid-offset-*-back、PDF_LAYOUT.margin*Back 同步 */
-    const GRID_OFFSET_TOP_BACK = '16.4mm';
-    const GRID_OFFSET_LEFT_BACK = '11mm';
+
+    /** 背面 offset 以 CSS :root 變數為唯一來源，避免 JS 常數漏同步 */
+    function getBackGridOffset() {
+      const style = getComputedStyle(document.documentElement);
+      const top = style.getPropertyValue('--grid-offset-top-back').trim();
+      const left = style.getPropertyValue('--grid-offset-left-back').trim();
+      return { top, left, topMm: parseFloat(top), leftMm: parseFloat(left) };
+    }
     const DECK_VERSION = 1;
     const DEFAULT_DECK_NAME = '未命名牌組';
     let doubleSidedPrint = false;
@@ -1201,15 +1206,22 @@
       pageW: 210,
       pageH: 297,
       marginL: parseFloat(GRID_OFFSET_LEFT_FRONT),
-      marginLBack: parseFloat(GRID_OFFSET_LEFT_BACK),
       marginT: parseFloat(GRID_OFFSET_TOP),
-      marginTBack: parseFloat(GRID_OFFSET_TOP_BACK),
       cardW: 63,
       cardH: 88,
       colGap: 0,
       rowGap: 0,
       cols: 3,
     };
+
+    function getPdfLayout() {
+      const back = getBackGridOffset();
+      return {
+        ...PDF_LAYOUT,
+        marginLBack: back.leftMm,
+        marginTBack: back.topMm,
+      };
+    }
 
     let cachedBackImageDataUrl = null;
 
@@ -1268,7 +1280,7 @@
 
       const { includeBackPages = false } = options;
       const { jsPDF } = window.jspdf;
-      const L = PDF_LAYOUT;
+      const L = getPdfLayout();
       let pdf = null;
       const frontPageCount = Math.ceil(flatCards.length / CARDS_PER_PAGE);
       let backImgData = null;
@@ -2415,8 +2427,9 @@
       const grid = document.createElement('div');
       grid.className = 'grid-container';
       grid.style.position = 'absolute';
-      grid.style.top = GRID_OFFSET_TOP_BACK;
-      grid.style.left = GRID_OFFSET_LEFT_BACK;
+      const backOff = getBackGridOffset();
+      grid.style.top = backOff.top;
+      grid.style.left = backOff.left;
 
       for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
         const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
@@ -2425,7 +2438,7 @@
 
       page.appendChild(grid);
       // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:createBackPageElement',message:'Back grid offset applied',data:{inlineTop:grid.style.top,inlineLeft:grid.style.left,jsTop:GRID_OFFSET_TOP_BACK,jsLeft:GRID_OFFSET_LEFT_BACK,cssVarTop:getComputedStyle(document.documentElement).getPropertyValue('--grid-offset-top-back').trim(),cssVarLeft:getComputedStyle(document.documentElement).getPropertyValue('--grid-offset-left-back').trim(),pdfMarginT:PDF_LAYOUT.marginTBack,pdfMarginL:PDF_LAYOUT.marginLBack,appVersion:APP_VERSION},timestamp:Date.now(),runId:'verify-1165',hypothesisId:'H2-partial-commit'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:createBackPageElement',message:'Back grid offset applied',data:{inlineTop:grid.style.top,inlineLeft:grid.style.left,cssVarTop:backOff.top,cssVarLeft:backOff.left,pdfMarginT:getPdfLayout().marginTBack,pdfMarginL:getPdfLayout().marginLBack,appVersion:APP_VERSION},timestamp:Date.now(),runId:'verify-1115',hypothesisId:'H3-css-single-source'})}).catch(()=>{});
       // #endregion
       return page;
     }
