@@ -2312,14 +2312,14 @@
       return el;
     }
 
-    function createBackPageElement() {
+    function createBackPageElement(cardCount) {
       const page = document.createElement('div');
       page.className = 'print-page print-page-back';
 
       const grid = document.createElement('div');
       grid.className = 'grid-container';
 
-      for (let i = 0; i < CARDS_PER_PAGE; i++) {
+      for (let i = 0; i < cardCount; i++) {
         const el = document.createElement('div');
         el.className = 'print-card';
         el.innerHTML = `<img src="${CARD_BACK_SRC}" alt="">`;
