@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PTCG 雙面校正靶紙</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1e293b;
+      color: #f1f5f9;
+      min-height: 100vh;
+      padding: 1.5rem;
+    }
+
+    .toolbar {
+      max-width: 960px;
+      margin: 0 auto 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .toolbar h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-right: auto;
+    }
+
+    .toolbar p {
+      width: 100%;
+      font-size: 0.85rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+
+    .btn {
+      padding: 0.55rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #3b82f6;
+      color: #fff;
+    }
+
+    .btn:hover { background: #2563eb; }
+
+    #pages {
+      max-width: 960px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .cal-page {
+      position: relative;
+      width: 210mm;
+      height: 297mm;
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+      margin: 0 auto;
+    }
+
+    .cal-page-label {
+      position: absolute;
+      top: 4mm;
+      left: 4mm;
+      font-size: 3mm;
+      font-weight: 700;
+      color: #64748b;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* 正背面共用：A4 絕對幾何中心原點 */
+    .cal-origin {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    /* ── 正面 ── */
+    .front-cross-h,
+    .front-cross-v {
+      position: absolute;
+      background: #dc2626;
+    }
+
+    .front-cross-h {
+      width: 210mm;
+      height: 0.25mm;
+      left: -105mm;
+      top: 0;
+      transform: translateY(-50%);
+    }
+
+    .front-cross-v {
+      width: 0.25mm;
+      height: 297mm;
+      top: -148.5mm;
+      left: 0;
+      transform: translateX(-50%);
+    }
+
+    .front-dot {
+      width: 10mm;
+      height: 10mm;
+      border-radius: 50%;
+      background: #dc2626;
+      transform: translate(-50%, -50%);
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    /* ── 背面 ── */
+    .back-cross-h,
+    .back-cross-v {
+      position: absolute;
+      background: rgba(37, 99, 235, 0.45);
+    }
+
+    .back-cross-h {
+      width: 210mm;
+      height: 0.2mm;
+      left: -105mm;
+      top: 0;
+      transform: translateY(-50%);
+    }
+
+    .back-cross-v {
+      width: 0.2mm;
+      height: 297mm;
+      top: -148.5mm;
+      left: 0;
+      transform: translateX(-50%);
+    }
+
+    .back-tick {
+      position: absolute;
+      background: #2563eb;
+      transform: translate(-50%, -50%);
+    }
+
+    .back-tick-h {
+      width: 1.2mm;
+      height: 0.35mm;
+    }
+
+    .back-tick-v {
+      width: 0.35mm;
+      height: 1.2mm;
+    }
+
+    .back-label {
+      position: absolute;
+      font-size: 2mm;
+      font-weight: 600;
+      color: #1d4ed8;
+      transform: translate(-50%, -50%);
+      white-space: nowrap;
+      line-height: 1;
+    }
+
+    #status {
+      max-width: 960px;
+      margin: 1rem auto 0;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        padding: 0;
+      }
+
+      .toolbar, #status { display: none !important; }
+
+      #pages {
+        gap: 0;
+        max-width: none;
+      }
+
+      .cal-page {
+        box-shadow: none;
+        page-break-after: always;
+      }
+
+      .cal-page:last-child {
+        page-break-after: auto;
+      }
+
+      @page {
+        size: A4 portrait;
+        margin: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <h1>PTCG 雙面校正靶紙</h1>
+    <button class="btn" type="button" id="btnPdf">下載 PDF</button>
+    <button class="btn" type="button" id="btnPrint">列印</button>
+    <p>
+      第 1 頁：正面（紅色圓心 + 十字線至四邊）｜第 2 頁：背面（半透明藍色十字 + 1mm 刻度）<br>
+      兩頁原點皆置於 A4 絕對幾何中心（top: 50%; left: 50%; transform: translate(-50%, -50%)）。<br>
+      列印時選「雙面 · 翻轉長邊」，比對正反面紅/藍十字是否重合以校正 offset。
+    </p>
+  </div>
+
+  <div id="pages"></div>
+  <p id="status">正在生成…</p>
+
+  <script src="assets/jspdf.umd.min.js"></script>
+  <script>
+    const PAGE_W = 210;
+    const PAGE_H = 297;
+    const CX = PAGE_W / 2;
+    const CY = PAGE_H / 2;
+    const DOT_R = 5;
+    const MAX_H = CX;
+    const MAX_V = CY;
+
+    const pagesRoot = document.getElementById('pages');
+    const statusEl = document.getElementById('status');
+
+    function mmEl(tag, className, styles = {}) {
+      const el = document.createElement(tag);
+      el.className = className;
+      Object.assign(el.style, styles);
+      return el;
+    }
+
+    function buildBackTicks(container) {
+      for (let mm = 1; mm <= MAX_H; mm++) {
+        [-1, 1].forEach((sign) => {
+          const x = sign * mm;
+
+          const tick = mmEl('div', 'back-tick back-tick-v');
+          tick.style.left = `${x}mm`;
+          tick.style.top = '0';
+          container.appendChild(tick);
+
+          if (mm % 5 === 0) {
+            const label = mmEl('div', 'back-label', { top: `${sign > 0 ? 2.5 : -2.5}mm`, left: `${x}mm` });
+            label.textContent = `${sign * mm}`;
+            container.appendChild(label);
+          }
+        });
+      }
+
+      for (let mm = 1; mm <= MAX_V; mm++) {
+        [-1, 1].forEach((sign) => {
+          const y = sign * mm;
+
+          const tick = mmEl('div', 'back-tick back-tick-h');
+          tick.style.left = '0';
+          tick.style.top = `${y}mm`;
+          container.appendChild(tick);
+
+          if (mm % 5 === 0) {
+            const label = mmEl('div', 'back-label', { left: `${sign > 0 ? 3 : -3}mm`, top: `${y}mm` });
+            label.textContent = `${sign * mm}`;
+            container.appendChild(label);
+          }
+        });
+      }
+    }
+
+    function buildFrontPage() {
+      const page = mmEl('div', 'cal-page');
+      page.innerHTML = '<div class="cal-page-label">Side 1 · 正面 FRONT</div>';
+
+      const origin = mmEl('div', 'cal-origin');
+      origin.appendChild(mmEl('div', 'front-cross-h'));
+      origin.appendChild(mmEl('div', 'front-cross-v'));
+      origin.appendChild(mmEl('div', 'front-dot'));
+      page.appendChild(origin);
+
+      return page;
+    }
+
+    function buildBackPage() {
+      const page = mmEl('div', 'cal-page');
+      page.innerHTML = '<div class="cal-page-label">Side 2 · 背面 BACK</div>';
+
+      const origin = mmEl('div', 'cal-origin');
+      origin.appendChild(mmEl('div', 'back-cross-h'));
+      origin.appendChild(mmEl('div', 'back-cross-v'));
+      buildBackTicks(origin);
+      page.appendChild(origin);
+
+      return page;
+    }
+
+    function renderPages() {
+      pagesRoot.innerHTML = '';
+      pagesRoot.appendChild(buildFrontPage());
+      pagesRoot.appendChild(buildBackPage());
+    }
+
+    function drawFrontPdf(pdf) {
+      pdf.setFillColor(220, 38, 38);
+      pdf.setDrawColor(220, 38, 38);
+      pdf.setLineWidth(0.25);
+
+      pdf.line(0, CY, PAGE_W, CY);
+      pdf.line(CX, 0, CX, PAGE_H);
+      pdf.circle(CX, CY, DOT_R, 'F');
+    }
+
+    function drawBackPdf(pdf) {
+      pdf.setDrawColor(96, 165, 250);
+      pdf.setLineWidth(0.2);
+      pdf.line(0, CY, PAGE_W, CY);
+      pdf.line(CX, 0, CX, PAGE_H);
+
+      pdf.setFillColor(37, 99, 235);
+
+      for (let mm = 1; mm <= MAX_H; mm++) {
+        [-1, 1].forEach((sign) => {
+          const x = CX + sign * mm;
+          pdf.rect(x - 0.175, CY - 0.6, 0.35, 1.2, 'F');
+          if (mm % 5 === 0) {
+            pdf.setFontSize(5);
+            pdf.text(String(sign * mm), x, CY + (sign > 0 ? 3.2 : -2.2), { align: 'center' });
+          }
+        });
+      }
+
+      for (let mm = 1; mm <= MAX_V; mm++) {
+        [-1, 1].forEach((sign) => {
+          const y = CY + sign * mm;
+          pdf.rect(CX - 0.6, y - 0.175, 1.2, 0.35, 'F');
+          if (mm % 5 === 0) {
+            pdf.setFontSize(5);
+            pdf.text(String(sign * mm), CX + (sign > 0 ? 3.5 : -3.5), y + 0.6, { align: 'center' });
+          }
+        });
+      }
+    }
+
+    function generatePdf() {
+      if (!window.jspdf?.jsPDF) {
+        throw new Error('jsPDF 未載入');
+      }
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+      drawFrontPdf(pdf);
+
+      pdf.addPage([PAGE_W, PAGE_H], 'portrait');
+      drawBackPdf(pdf);
+
+      pdf.save('ptcg-duplex-calibration.pdf');
+      return true;
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    document.getElementById('btnPdf').addEventListener('click', () => {
+      try {
+        generatePdf();
+        setStatus('PDF 已下載：ptcg-duplex-calibration.pdf');
+      } catch (err) {
+        setStatus(`PDF 失敗：${err.message}`);
+      }
+    });
+
+    document.getElementById('btnPrint').addEventListener('click', () => {
+      window.print();
+    });
+
+    renderPages();
+
+    try {
+      generatePdf();
+      setStatus('已自動下載 PDF：ptcg-duplex-calibration.pdf（亦可直接列印預覽）');
+    } catch (err) {
+      setStatus(`預覽已就緒；PDF 自動下載失敗：${err.message}，請按「下載 PDF」重試`);
+    }
+  </script>
+</body>
+</html>
