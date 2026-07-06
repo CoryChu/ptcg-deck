@@ -111,17 +111,6 @@
       transform: translateX(-50%);
     }
 
-    .front-dot {
-      width: 10mm;
-      height: 10mm;
-      border-radius: 50%;
-      background: #dc2626;
-      transform: translate(-50%, -50%);
-      position: absolute;
-      top: 0;
-      left: 0;
-    }
-
     /* ── 背面 ── */
     .back-cross-h,
     .back-cross-v {
@@ -213,7 +202,7 @@
     <button class="btn" type="button" id="btnPdf">下載 PDF</button>
     <button class="btn" type="button" id="btnPrint">列印</button>
     <p>
-      第 1 頁：正面（紅色圓心 + 十字線至四邊）｜第 2 頁：背面（半透明藍色十字 + 1mm 刻度）<br>
+      第 1 頁：正面（紅色十字線至四邊）｜第 2 頁：背面（半透明藍色十字 + 1mm 刻度）<br>
       兩頁原點皆置於 A4 絕對幾何中心（top: 50%; left: 50%; transform: translate(-50%, -50%)）。<br>
       列印時選「雙面 · 翻轉長邊」，比對正反面紅/藍十字是否重合以校正 offset。
     </p>
@@ -228,7 +217,6 @@
     const PAGE_H = 297;
     const CX = PAGE_W / 2;
     const CY = PAGE_H / 2;
-    const DOT_R = 5;
     const MAX_H = CX;
     const MAX_V = CY;
 
