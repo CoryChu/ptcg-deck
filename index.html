@@ -645,6 +645,12 @@
       print-color-adjust: exact;
     }
 
+    #print-root .print-card-empty,
+    .preview-pages .print-card-empty {
+      border-color: transparent;
+      background: transparent;
+    }
+
     /* ── 排版預覽視窗 ── */
     .preview-overlay {
       display: none;
@@ -1041,7 +1047,7 @@
 
     const APP_VERSION = '1.3';
     const CARDS_PER_PAGE = 9;
-    const CARD_BACK_SRC = 'assets/card-back.png';
+    const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const DECK_VERSION = 1;
     const DEFAULT_DECK_NAME = '未命名牌組';
     let doubleSidedPrint = false;
@@ -1228,7 +1234,7 @@
       let backFormat = null;
 
       if (includeBackPages) {
-        backImgData = await ensurePdfImageData(CARD_BACK_SRC);
+        backImgData = await ensurePdfImageData(BACK_IMAGE_SRC);
         backFormat = imageFormatForPdf(backImgData);
       }
 
@@ -1249,7 +1255,8 @@
       for (let p = 0; p < frontPageCount; p++) {
         addPortraitPage();
         const slice = flatCards.slice(p * CARDS_PER_PAGE, (p + 1) * CARDS_PER_PAGE);
-        for (let slot = 0; slot < slice.length; slot++) {
+        for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
+          if (!slice[slot]) continue;
           const imgData = await ensurePdfImageData(slice[slot].src);
           const format = imageFormatForPdf(imgData);
           drawCardAtSlot(imgData, format, slot);
@@ -1257,7 +1264,7 @@
 
         if (includeBackPages) {
           addPortraitPage();
-          for (let slot = 0; slot < slice.length; slot++) {
+          for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
             drawCardAtSlot(backImgData, backFormat, slot);
           }
         }
@@ -2312,17 +2319,39 @@
       return el;
     }
 
-    function createBackPageElement(cardCount) {
+    function createEmptyCardSlot() {
+      const el = document.createElement('div');
+      el.className = 'print-card print-card-empty';
+      el.setAttribute('aria-hidden', 'true');
+      return el;
+    }
+
+    function createFrontPageElement(cardsOnPage) {
+      const page = document.createElement('div');
+      page.className = 'print-page';
+
+      const grid = document.createElement('div');
+      grid.className = 'grid-container';
+
+      for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
+        grid.appendChild(cardsOnPage[slot] ? createCardElement(cardsOnPage[slot]) : createEmptyCardSlot());
+      }
+
+      page.appendChild(grid);
+      return page;
+    }
+
+    function createBackPageElement() {
       const page = document.createElement('div');
       page.className = 'print-page print-page-back';
 
       const grid = document.createElement('div');
       grid.className = 'grid-container';
 
-      for (let i = 0; i < cardCount; i++) {
+      for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
         const el = document.createElement('div');
         el.className = 'print-card';
-        el.innerHTML = `<img src="${CARD_BACK_SRC}" alt="">`;
+        el.innerHTML = `<img src="${BACK_IMAGE_SRC}" alt="">`;
         grid.appendChild(el);
       }
 
@@ -2339,20 +2368,11 @@
       const frontPageCount = Math.ceil(flatCards.length / CARDS_PER_PAGE);
 
       for (let p = 0; p < frontPageCount; p++) {
-        const page = document.createElement('div');
-        page.className = 'print-page';
-
-        const grid = document.createElement('div');
-        grid.className = 'grid-container';
-
         const slice = flatCards.slice(p * CARDS_PER_PAGE, (p + 1) * CARDS_PER_PAGE);
-        slice.forEach(card => grid.appendChild(createCardElement(card)));
-
-        page.appendChild(grid);
-        target.appendChild(page);
+        target.appendChild(createFrontPageElement(slice));
 
         if (includeBackPages) {
-          target.appendChild(createBackPageElement(slice.length));
+          target.appendChild(createBackPageElement());
         }
       }
 
@@ -2521,7 +2541,8 @@
     });
 
     btnPrint.addEventListener('click', async () => {
-      if (!buildPrintLayout(printRoot, { includeBackPages: doubleSidedPrint }).ok) return;
+      const result = buildPrintLayout(printRoot, { includeBackPages: doubleSidedPrint });
+      if (!result.ok) return;
       await waitForImages(printRoot);
       window.print();
     });
