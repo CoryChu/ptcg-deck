@@ -1205,6 +1205,27 @@
       cols: 3,
     };
 
+    let cachedBackImageDataUrl = null;
+
+    async function getBackImageDataUrl() {
+      const bustUrl = `${BACK_IMAGE_SRC}?v=${APP_VERSION}`;
+      const resp = await fetch(bustUrl, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('無法載入卡背圖');
+      const blob = await resp.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('卡背圖讀取失敗'));
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    async function loadBackImageDataUrl(force = false) {
+      if (!force && cachedBackImageDataUrl) return cachedBackImageDataUrl;
+      cachedBackImageDataUrl = await getBackImageDataUrl();
+      return cachedBackImageDataUrl;
+    }
+
     function drawCardBorder(pdf, x, y, w, h) {
       pdf.setDrawColor(203, 213, 225);
       pdf.setLineWidth(0.2);
@@ -1248,7 +1269,7 @@
       let backFormat = null;
 
       if (includeBackPages) {
-        backImgData = await ensurePdfImageData(BACK_IMAGE_SRC);
+        backImgData = await loadBackImageDataUrl(true);
         backFormat = imageFormatForPdf(backImgData);
       }
 
@@ -2352,10 +2373,10 @@
       return el;
     }
 
-    function createBackCardElement() {
+    function createBackCardElement(backSrc) {
       const el = document.createElement('div');
       el.className = 'print-card';
-      el.innerHTML = `<img src="${BACK_IMAGE_SRC}" alt="">`;
+      el.innerHTML = `<img src="${backSrc}" alt="">`;
       return el;
     }
 
@@ -2381,7 +2402,7 @@
       return page;
     }
 
-    function createBackPageElement(pageCards) {
+    function createBackPageElement(pageCards, backSrc) {
       const page = document.createElement('div');
       page.className = 'print-page print-page-back';
 
@@ -2393,20 +2414,21 @@
 
       for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
         const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
-        grid.appendChild(pageCards[frontSlot] ? createBackCardElement() : createEmptyCardSlot());
+        grid.appendChild(pageCards[frontSlot] ? createBackCardElement(backSrc) : createEmptyCardSlot());
       }
 
       page.appendChild(grid);
       return page;
     }
 
-    function buildPrintLayout(target = printRoot, options = {}) {
+    async function buildPrintLayout(target = printRoot, options = {}) {
       const { includeBackPages = false } = options;
       const flatCards = expandCards();
       if (flatCards.length === 0) return { ok: false };
 
       target.innerHTML = '';
       const frontPageCount = Math.ceil(flatCards.length / CARDS_PER_PAGE);
+      const backSrc = includeBackPages ? await loadBackImageDataUrl(true) : null;
 
       for (let p = 0; p < frontPageCount; p++) {
         const slice = flatCards.slice(p * CARDS_PER_PAGE, (p + 1) * CARDS_PER_PAGE);
@@ -2415,7 +2437,7 @@
         target.appendChild(createFrontPageElement(pageCards));
 
         if (includeBackPages) {
-          target.appendChild(createBackPageElement(pageCards));
+          target.appendChild(createBackPageElement(pageCards, backSrc));
         }
       }
 
@@ -2443,7 +2465,7 @@
     }
 
     async function rebuildPreviewLayout() {
-      const result = buildPrintLayout(previewRoot, { includeBackPages: doubleSidedPrint });
+      const result = await buildPrintLayout(previewRoot, { includeBackPages: doubleSidedPrint });
       if (!result.ok) return null;
       await waitForImages(previewRoot);
       lastPreviewStats = result;
@@ -2584,8 +2606,12 @@
     });
 
     btnPrint.addEventListener('click', async () => {
-      const result = buildPrintLayout(printRoot, { includeBackPages: doubleSidedPrint });
-      if (!result.ok) return;
+      if (previewOverlay.classList.contains('is-open') && previewRoot.innerHTML.trim()) {
+        printRoot.innerHTML = previewRoot.innerHTML;
+      } else {
+        const result = await buildPrintLayout(printRoot, { includeBackPages: doubleSidedPrint });
+        if (!result.ok) return;
+      }
       await waitForImages(printRoot);
       window.print();
     });
