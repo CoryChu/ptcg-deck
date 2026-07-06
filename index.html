@@ -1063,7 +1063,8 @@
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
     const GRID_OFFSET_LEFT_FRONT = '10.5mm';
-    const GRID_OFFSET_TOP_BACK = '16.7mm';
+    /** 與 CSS --grid-offset-*-back、PDF_LAYOUT.margin*Back 同步 */
+    const GRID_OFFSET_TOP_BACK = '16.6mm';
     const GRID_OFFSET_LEFT_BACK = '9.7mm';
     const DECK_VERSION = 1;
     const DEFAULT_DECK_NAME = '未命名牌組';
@@ -1199,10 +1200,10 @@
     const PDF_LAYOUT = {
       pageW: 210,
       pageH: 297,
-      marginL: 10.5,
-      marginLBack: 9.7,
-      marginT: 16.5,
-      marginTBack: 16.7,
+      marginL: parseFloat(GRID_OFFSET_LEFT_FRONT),
+      marginLBack: parseFloat(GRID_OFFSET_LEFT_BACK),
+      marginT: parseFloat(GRID_OFFSET_TOP),
+      marginTBack: parseFloat(GRID_OFFSET_TOP_BACK),
       cardW: 63,
       cardH: 88,
       colGap: 0,
@@ -2413,9 +2414,6 @@
 
       const grid = document.createElement('div');
       grid.className = 'grid-container';
-      grid.style.position = 'absolute';
-      grid.style.top = GRID_OFFSET_TOP_BACK;
-      grid.style.left = GRID_OFFSET_LEFT_BACK;
 
       for (let backSlot = 0; backSlot < CARDS_PER_PAGE; backSlot++) {
         const frontSlot = mirroredFrontSlotForBackSlot(backSlot);
@@ -2423,6 +2421,9 @@
       }
 
       page.appendChild(grid);
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:createBackPageElement',message:'Back grid computed offset',data:{cssVarTop:getComputedStyle(document.documentElement).getPropertyValue('--grid-offset-top-back').trim(),cssVarLeft:getComputedStyle(document.documentElement).getPropertyValue('--grid-offset-left-back').trim(),computedTop:getComputedStyle(grid).top,computedLeft:getComputedStyle(grid).left,pdfMarginT:PDF_LAYOUT.marginTBack,pdfMarginL:PDF_LAYOUT.marginLBack},timestamp:Date.now(),runId:'post-fix',hypothesisId:'H1-sync'})}).catch(()=>{});
+      // #endregion
       return page;
     }
 
