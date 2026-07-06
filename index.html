@@ -1257,7 +1257,7 @@
 
         if (includeBackPages) {
           addPortraitPage();
-          for (let slot = 0; slot < CARDS_PER_PAGE; slot++) {
+          for (let slot = 0; slot < slice.length; slot++) {
             drawCardAtSlot(backImgData, backFormat, slot);
           }
         }
@@ -2352,7 +2352,7 @@
         target.appendChild(page);
 
         if (includeBackPages) {
-          target.appendChild(createBackPageElement());
+          target.appendChild(createBackPageElement(slice.length));
         }
       }
 
