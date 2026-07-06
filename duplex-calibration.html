@@ -273,7 +273,6 @@
       const origin = mmEl('div', 'cal-origin');
       origin.appendChild(mmEl('div', 'front-cross-h'));
       origin.appendChild(mmEl('div', 'front-cross-v'));
-      origin.appendChild(mmEl('div', 'front-dot'));
       page.appendChild(origin);
 
       return page;
@@ -299,13 +298,10 @@
     }
 
     function drawFrontPdf(pdf) {
-      pdf.setFillColor(220, 38, 38);
       pdf.setDrawColor(220, 38, 38);
       pdf.setLineWidth(0.25);
-
       pdf.line(0, CY, PAGE_W, CY);
       pdf.line(CX, 0, CX, PAGE_H);
-      pdf.circle(CX, CY, DOT_R, 'F');
     }
 
     function drawBackPdf(pdf) {
