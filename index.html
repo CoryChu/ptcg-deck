@@ -1069,7 +1069,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.4.2';
+    const APP_VERSION = '1.4.3';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1483,6 +1483,105 @@
       return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(String(text || ''));
     }
 
+    function normalizeEnglishCardName(text) {
+      return String(text || '').trim().toLowerCase().replace(/[''']/g, "'").replace(/\s+/g, ' ');
+    }
+
+    function extractChineseFrom52pokeItems(items, englishName) {
+      const normalizedEn = normalizeEnglishCardName(englishName);
+      const snippetMatches = [];
+      const tcgMatches = [];
+
+      for (const item of items) {
+        const title = String(item?.title || '').trim();
+        if (title.includes('（TCG）')) {
+          const base = title.split('（')[0].trim();
+          if (hasCjkText(base)) tcgMatches.push(base);
+        }
+
+        const snippet = String(item?.snippet || '')
+          .replace(/&#039;/g, "'")
+          .replace(/&amp;/g, '&')
+          .replace(/<[^>]+>/g, ' ');
+        if (normalizeEnglishCardName(snippet).includes(normalizedEn)) {
+          const inline = snippet.match(/([\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff][^（]{1,30}?)（[^）]*英文︰/);
+          if (inline) {
+            const chinese = inline[1].trim();
+            if (hasCjkText(chinese)) snippetMatches.push(chinese);
+          }
+        }
+      }
+
+      if (snippetMatches.length > 0) return snippetMatches[0];
+      if (tcgMatches.length > 0) return tcgMatches[0];
+      return null;
+    }
+
+    function resolveCardNameVia52pokeJsonp(name) {
+      return new Promise((resolve, reject) => {
+        const callbackName = `_poke52_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const script = document.createElement('script');
+        let settled = false;
+
+        const cleanup = () => {
+          if (script.parentNode) script.parentNode.removeChild(script);
+          delete window[callbackName];
+        };
+
+        const finish = (result) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(result);
+        };
+
+        const timeoutId = window.setTimeout(() => {
+          finish({ ok: false, error: 'jsonp timeout', chineseName: null, source: null });
+        }, 12000);
+
+        window[callbackName] = (data) => {
+          window.clearTimeout(timeoutId);
+          const items = data?.query?.search || [];
+          const chineseName = extractChineseFrom52pokeItems(items, name);
+          // #region agent log
+          fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H6',location:'index.html:resolveCardNameVia52pokeJsonp',message:'client jsonp lookup result',data:{name,resultCount:items.length,chineseName},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
+          // #endregion
+          finish(chineseName
+            ? { ok: true, originalName: name, chineseName, source: '52poke-client' }
+            : { ok: false, originalName: name, chineseName: null, source: null, error: 'no chinese name found' });
+        };
+
+        script.src = `https://wiki.52poke.com/api.php?${new URLSearchParams({
+          action: 'query',
+          list: 'search',
+          srsearch: name,
+          format: 'json',
+          callback: callbackName,
+        }).toString()}`;
+        script.onerror = () => {
+          window.clearTimeout(timeoutId);
+          finish({ ok: false, error: 'jsonp failed', chineseName: null, source: null });
+        };
+        document.head.appendChild(script);
+      });
+    }
+
+    async function resolveCardNameForImport(name) {
+      let resolved = null;
+
+      try {
+        resolved = await resolveCardNameApi(name);
+      } catch {
+        resolved = null;
+      }
+
+      if ((!resolved?.ok || !resolved?.chineseName) && !isElectron) {
+        resolved = await resolveCardNameVia52pokeJsonp(name);
+      }
+
+      return resolved;
+    }
+
     async function resolveCardNameApi(name) {
       if (isElectron) {
         return ipcRenderer.invoke('resolve-card-name', name);
@@ -1505,9 +1604,9 @@
 
       if (!hasCjkText(name)) {
         try {
-          const resolved = await resolveCardNameApi(name);
+          const resolved = await resolveCardNameForImport(name);
           // #region agent log
-          fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H4',location:'index.html:searchCardImagesForImport',message:'name resolution for import',data:{name,resolved},timestamp:Date.now(),runId:'pre-fix'})}).catch(()=>{});
+          fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H4',location:'index.html:searchCardImagesForImport',message:'name resolution for import',data:{name,resolved},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
           // #endregion
           if (resolved?.ok && resolved.chineseName) {
             searchKeyword = resolved.chineseName;
@@ -1520,7 +1619,7 @@
 
       let searchResult = await searchPokemonCardsApi(searchKeyword);
       // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H4',location:'index.html:searchCardImagesForImport',message:'HK image search result',data:{name,searchKeyword,resolvedFrom,count:searchResult?.images?.length||0,ok:searchResult?.ok},timestamp:Date.now(),runId:'pre-fix'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H4',location:'index.html:searchCardImagesForImport',message:'HK image search result',data:{name,searchKeyword,resolvedFrom,count:searchResult?.images?.length||0,ok:searchResult?.ok},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
       // #endregion
 
       if ((!searchResult.ok || searchResult.images.length === 0) && searchKeyword !== name) {

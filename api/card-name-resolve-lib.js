@@ -135,7 +135,6 @@ async function fetch52pokeChineseNameViaApi(englishName) {
     list: 'search',
     srsearch: englishName,
     format: 'json',
-    origin: '*',
   }).toString()}`;
   const response = await fetch(url, {
     headers: { ...FETCH_HEADERS, Referer: 'https://wiki.52poke.com/' },
