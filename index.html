@@ -1058,7 +1058,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.3.13';
+    const APP_VERSION = '1.3.14';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -2062,9 +2062,13 @@
           return;
         }
 
-        const imageFiles = extractImageFiles(dataTransfer);
+        const imageFiles = filterImageFiles(allFiles);
         const substantialFiles = imageFiles.filter((f) => f.size >= 10000);
         const localFiles = substantialFiles.length > 0 ? substantialFiles : imageFiles;
+
+        // #region agent log
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Image drop path',data:{imageCount:imageFiles.length,imageNames:imageFiles.map(f=>f.name)},timestamp:Date.now(),runId:'image-drop-fix',hypothesisId:'H5-datatransfer-cleared'})}).catch(()=>{});
+        // #endregion
 
         if (localFiles.length > 1) {
           const added = await addCardsFromFiles(localFiles);
@@ -2073,7 +2077,7 @@
           return;
         }
 
-        const allUrls = await extractImageUrlsAsync(dataTransfer);
+        const allUrls = await collectImageUrlsFromSnapshot(dropSnapshot, dataTransfer);
         const bestUrl = pickBestImageUrls(allUrls, 1)[0];
         const bestFile = pickBestImageFile(imageFiles);
 
