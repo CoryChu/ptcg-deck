@@ -138,6 +138,11 @@
 
     .btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.15); }
 
+    .btn-undo-redo {
+      min-width: 2.5rem;
+      padding: 0.45rem 0.65rem;
+    }
+
     .deck-status {
       font-size: 0.8rem;
       color: var(--muted);
@@ -958,6 +963,12 @@
     <div class="header-actions">
       <span id="deckStatus" class="deck-status"></span>
       <div class="header-actions-bar">
+        <button id="btnUndo" class="btn btn-secondary btn-undo-redo" disabled title="上一步 (⌘Z)" aria-label="上一步">
+          <span class="btn-text-full">上一步</span><span class="btn-text-short">↩</span>
+        </button>
+        <button id="btnRedo" class="btn btn-secondary btn-undo-redo" disabled title="下一步 (⇧⌘Z)" aria-label="下一步">
+          <span class="btn-text-full">下一步</span><span class="btn-text-short">↪</span>
+        </button>
         <button id="btnPreview" class="btn btn-secondary" disabled>
           <span class="btn-text-full">預覽</span><span class="btn-text-short">預覽</span>
         </button>
@@ -1058,7 +1069,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.3.15';
+    const APP_VERSION = '1.4.0';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1079,6 +1090,60 @@
     let nextId = 1;
     let currentDeckPath = null;
 
+    const UNDO_LIMIT = 50;
+    const undoStack = [];
+    const redoStack = [];
+
+    function captureDeckSnapshot() {
+      return {
+        cards: cards.map((c) => ({ ...c })),
+        nextId,
+        deckName: deckNameInput.value,
+        currentDeckPath,
+      };
+    }
+
+    function restoreDeckSnapshot(snapshot) {
+      cards.length = 0;
+      cards.push(...snapshot.cards.map((c) => ({ ...c })));
+      nextId = snapshot.nextId;
+      setDeckName(snapshot.deckName);
+      currentDeckPath = snapshot.currentDeckPath;
+      if (previewOverlay.classList.contains('is-open')) closePreview();
+      renderPreview();
+      updateUI();
+    }
+
+    function pushUndoSnapshot() {
+      undoStack.push(captureDeckSnapshot());
+      if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+      redoStack.length = 0;
+      updateUndoRedoButtons();
+    }
+
+    function undoDeckChange() {
+      if (undoStack.length === 0) return;
+      redoStack.push(captureDeckSnapshot());
+      restoreDeckSnapshot(undoStack.pop());
+      deckStatus.textContent = '已復原上一步';
+      updateUI({ keepStatus: true });
+      updateUndoRedoButtons();
+    }
+
+    function redoDeckChange() {
+      if (redoStack.length === 0) return;
+      undoStack.push(captureDeckSnapshot());
+      restoreDeckSnapshot(redoStack.pop());
+      deckStatus.textContent = '已重做下一步';
+      updateUI({ keepStatus: true });
+      updateUndoRedoButtons();
+    }
+
+    function updateUndoRedoButtons() {
+      btnUndo.disabled = undoStack.length === 0;
+      btnRedo.disabled = redoStack.length === 0;
+    }
+
     const dropZone = document.getElementById('dropZone');
     const previewGrid = document.getElementById('previewGrid');
     const emptyHint = document.getElementById('emptyHint');
@@ -1091,6 +1156,8 @@
     const btnSaveDeck = document.getElementById('btnSaveDeck');
     const btnOpenDeck = document.getElementById('btnOpenDeck');
     const btnImportDeck = document.getElementById('btnImportDeck');
+    const btnUndo = document.getElementById('btnUndo');
+    const btnRedo = document.getElementById('btnRedo');
     const btnClear = document.getElementById('btnClear');
     const importOverlay = document.getElementById('importOverlay');
     const importText = document.getElementById('importText');
@@ -1365,6 +1432,7 @@
           ? `已儲存：${getDeckDisplayName()}`
           : (hasCards ? '未儲存' : '');
       }
+      updateUndoRedoButtons();
     }
 
     function setImportStatus(message, tone = '') {
@@ -1374,6 +1442,7 @@
     }
 
     function addCardFromSrc(name, src, quantity = 1, options = {}) {
+      if (!options.skipUndo) pushUndoSnapshot();
       cards.push({
         id: nextId++,
         name,
@@ -1469,6 +1538,7 @@
       const summary = { added: 0, failed: [], skipped: [] };
       currentDeckPath = null;
       btnRunImport.disabled = true;
+      pushUndoSnapshot();
 
       for (let i = 0; i < entries.length; i++) {
         const { name, quantity } = entries[i];
@@ -1509,7 +1579,7 @@
           const dataUrl = await fetchImageAsDataUrl(targetUrl);
           if (!(await validateImageDataUrl(dataUrl))) throw new Error('invalid');
           const file = targetUrl.split('/').pop();
-          addCardFromSrc(`${name}-${file}`, dataUrl, quantity, { skipRender: true });
+          addCardFromSrc(`${name}-${file}`, dataUrl, quantity, { skipRender: true, skipUndo: true });
           summary.added += 1;
         } catch {
           summary.failed.push(`${name}（圖片下載失敗）`);
@@ -1563,7 +1633,10 @@
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
-          addCardFromSrc(file.name, e.target.result, 1, { skipRender: options.skipRender });
+          addCardFromSrc(file.name, e.target.result, 1, {
+            skipRender: options.skipRender,
+            skipUndo: options.skipUndo,
+          });
           resolve();
         };
         reader.onerror = reject;
@@ -1577,9 +1650,10 @@
       deckStatus.textContent = `正在載入 ${imageFiles.length} 張圖片…`;
       let added = 0;
       const batch = imageFiles.length > 1;
+      if (batch) pushUndoSnapshot();
       for (const file of imageFiles) {
         try {
-          await addCardFromFile(file, { skipRender: batch });
+          await addCardFromFile(file, { skipRender: batch, skipUndo: batch });
           added += 1;
         } catch {
           /* skip failed file */
@@ -1997,21 +2071,22 @@
       });
     }
 
-    async function addDeckFromFile(file, prefetchedText) {
+    async function addDeckFromFile(file, prefetchedText, options = {}) {
       const text = prefetchedText ?? await readFileAsText(file);
       const deckData = parseDeckFileText(text);
-      const added = addDeckData(deckData);
+      const added = addDeckData(deckData, options);
       const deckLabel = deckData.name || deckNameFromFilePath(file.name);
       return { added, deckLabel };
     }
 
     async function handleDeckFilesDrop(deckEntries) {
+      pushUndoSnapshot();
       let totalAdded = 0;
       const labels = [];
       for (const entry of deckEntries) {
         const file = entry.file ?? entry;
         const prefetchedText = entry.text;
-        const { added, deckLabel } = await addDeckFromFile(file, prefetchedText);
+        const { added, deckLabel } = await addDeckFromFile(file, prefetchedText, { skipUndo: true });
         totalAdded += added;
         labels.push(deckLabel);
       }
@@ -2159,6 +2234,7 @@
       const fromIdx = cards.findIndex((c) => c.id === fromId);
       const toIdx = cards.findIndex((c) => c.id === toId);
       if (fromIdx < 0 || toIdx < 0 || fromId === toId) return;
+      pushUndoSnapshot();
       const [moved] = cards.splice(fromIdx, 1);
       cards.splice(toIdx, 0, moved);
       currentDeckPath = null;
@@ -2479,6 +2555,7 @@
     });
 
     function adjustCardQuantity(card, action) {
+      pushUndoSnapshot();
       if (action === 'inc') {
         card.quantity = Math.min(999, card.quantity + 1);
       } else if (action === 'dec') {
@@ -2506,6 +2583,7 @@
         return;
       }
       if (btn.dataset.action === 'del') {
+        pushUndoSnapshot();
         const idx = cards.indexOf(card);
         cards.splice(idx, 1);
         renderPreview();
@@ -2529,6 +2607,7 @@
       const id = Number(e.target.dataset.id);
       const card = cards.find(c => c.id === id);
       if (!card) return;
+      pushUndoSnapshot();
       const val = parseInt(e.target.value, 10);
       card.quantity = isNaN(val) ? 0 : Math.max(0, Math.min(999, val));
       e.target.value = card.quantity;
@@ -2707,6 +2786,8 @@
     }
 
     function clearDeck() {
+      if (cards.length === 0) return;
+      pushUndoSnapshot();
       cards.length = 0;
       nextId = 1;
       currentDeckPath = null;
@@ -2717,7 +2798,8 @@
       updateUI();
     }
 
-    function addDeckData(deckData) {
+    function addDeckData(deckData, options = {}) {
+      if (!options.skipUndo) pushUndoSnapshot();
       if (!deckData || !Array.isArray(deckData.cards)) {
         throw new Error('無效的牌組檔案格式');
       }
@@ -2782,6 +2864,21 @@
     });
 
     document.addEventListener('keydown', (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        e.preventDefault();
+        undoDeckChange();
+        return;
+      }
+      if (mod && (e.key.toLowerCase() === 'z' && e.shiftKey || e.key.toLowerCase() === 'y')) {
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        e.preventDefault();
+        redoDeckChange();
+        return;
+      }
       if (e.key !== 'Escape') return;
       if (cardPickOverlay.classList.contains('is-open')) {
         closeCardPickOverlay(null);
@@ -2849,6 +2946,9 @@
     });
 
     btnImportDeck.addEventListener('click', openImportDialog);
+
+    btnUndo.addEventListener('click', undoDeckChange);
+    btnRedo.addEventListener('click', redoDeckChange);
 
     btnCancelImport.addEventListener('click', closeImportDialog);
 
