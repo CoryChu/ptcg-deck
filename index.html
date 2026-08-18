@@ -1058,7 +1058,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.3.12';
+    const APP_VERSION = '1.3.13';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1153,9 +1153,13 @@
     }
 
     function parseDeckFileText(text) {
+      const normalized = String(text ?? '').replace(/^\uFEFF/, '').trim();
+      if (!normalized) {
+        throw new Error('牌組檔案內容為空（若為 iCloud 檔案請先下載至本機）');
+      }
       let deckData;
       try {
-        deckData = JSON.parse(text);
+        deckData = JSON.parse(normalized);
       } catch {
         throw new Error('無效的牌組檔案（不是有效的 JSON）');
       }
@@ -1901,39 +1905,49 @@
       return false;
     }
 
-    async function findDeckFiles(allFiles) {
-      const byName = allFiles.filter((f) => isDeckFileName(f.name));
-      if (byName.length > 0) return byName;
+    async function readFileAsText(file) {
+      const buffer = await file.arrayBuffer();
+      if (!buffer.byteLength) return '';
 
-      const candidates = [];
-      for (const file of allFiles) {
-        if (file.type?.startsWith('image/')) continue;
-        if (file.size > 20 * 1024 * 1024) continue;
-        try {
-          const text = await readFileAsText(file);
-          parseDeckFileText(text);
-          candidates.push({ file, text });
-        } catch {
-          /* 非牌組檔 */
-        }
+      const bytes = new Uint8Array(buffer);
+      if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+        return new TextDecoder('utf-16le').decode(buffer);
       }
-      return candidates;
+      if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+        return new TextDecoder('utf-16be').decode(buffer);
+      }
+      return new TextDecoder('utf-8').decode(buffer);
     }
 
-    async function readFileAsText(file) {
-      if (typeof file.text === 'function') {
-        return file.text();
-      }
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error || new Error('讀取檔案失敗'));
-        reader.readAsText(file);
+    function snapshotDroppedFiles(dataTransfer) {
+      const files = extractDroppedFiles(dataTransfer);
+      const reads = Promise.all(files.map(async (file) => ({
+        file,
+        text: await readFileAsText(file),
+      })));
+      return { files, reads };
+    }
+
+    function findDeckFilesFromSnapshots(fileSnapshots) {
+      const byName = fileSnapshots.filter((entry) => isDeckFileName(entry.file.name));
+      if (byName.length > 0) return byName;
+
+      return fileSnapshots.filter((entry) => {
+        if (entry.file.type?.startsWith('image/')) return false;
+        try {
+          parseDeckFileText(entry.text);
+          return true;
+        } catch {
+          return false;
+        }
       });
     }
 
     async function addDeckFromFile(file, prefetchedText) {
       const text = prefetchedText ?? await readFileAsText(file);
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:addDeckFromFile',message:'Deck text read',data:{fileName:file.name,fileSize:file.size,textLen:text?.length,textStart:String(text).slice(0,40)},timestamp:Date.now(),runId:'deck-drop-fix4',hypothesisId:'H4-async-read'})}).catch(()=>{});
+      // #endregion
       const deckData = parseDeckFileText(text);
       const added = addDeckData(deckData);
       const deckLabel = deckData.name || deckNameFromFilePath(file.name);
@@ -1962,7 +1976,7 @@
     let dropLock = false;
     let lastDropAt = 0;
 
-    async function handleDrop(dataTransfer) {
+    async function handleDrop(dataTransfer, dropSnapshot) {
       const now = Date.now();
       if (dropLock || now - lastDropAt < 800) return;
       dropLock = true;
@@ -1970,14 +1984,19 @@
 
       let dropStatusMessage = '';
 
-      const allFiles = extractDroppedFiles(dataTransfer);
+      const allFiles = dropSnapshot?.files ?? extractDroppedFiles(dataTransfer);
+      const fileSnapshotsPromise = dropSnapshot?.reads ?? Promise.all(allFiles.map(async (file) => ({
+        file,
+        text: await readFileAsText(file),
+      })));
 
       // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop files received',data:{allCount:allFiles.length,fileNames:allFiles.map(f=>f.name),fileTypes:allFiles.map(f=>f.type),nameMatch:allFiles.map(f=>isDeckFileName(f.name))},timestamp:Date.now(),runId:'deck-drop-fix2',hypothesisId:'H2-macos-copy-suffix'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop files received',data:{allCount:allFiles.length,fileNames:allFiles.map(f=>f.name),fileSizes:allFiles.map(f=>f.size),nameMatch:allFiles.map(f=>isDeckFileName(f.name))},timestamp:Date.now(),runId:'deck-drop-fix4',hypothesisId:'H4-async-read'})}).catch(()=>{});
       // #endregion
 
       try {
-        const deckEntries = await findDeckFiles(allFiles);
+        const fileSnapshots = await fileSnapshotsPromise;
+        const deckEntries = findDeckFilesFromSnapshots(fileSnapshots);
 
         // #region agent log
         fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Deck files identified',data:{deckCount:deckEntries.length,deckNames:deckEntries.map(e=>(e.file??e).name)},timestamp:Date.now(),runId:'deck-drop-fix2',hypothesisId:'H2-macos-copy-suffix'})}).catch(()=>{});
@@ -2039,7 +2058,7 @@
         }
         deckStatus.textContent = dropStatusMessage;
         // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop failed',data:{error:err.message,fileNames:allFiles.map(f=>f.name)},timestamp:Date.now(),runId:'deck-drop-fix3',hypothesisId:'H3-updateUI-wipe'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop failed',data:{error:err.message,fileNames:allFiles.map(f=>f.name),fileSizes:allFiles.map(f=>f.size)},timestamp:Date.now(),runId:'deck-drop-fix4',hypothesisId:'H4-async-read'})}).catch(()=>{});
         // #endregion
       } finally {
         dropLock = false;
@@ -2061,7 +2080,8 @@
       e.preventDefault();
       e.stopPropagation();
       dropZone.classList.remove('drag-over');
-      handleDrop(e.dataTransfer);
+      const dropSnapshot = snapshotDroppedFiles(e.dataTransfer);
+      void handleDrop(e.dataTransfer, dropSnapshot);
     });
 
     dropZone.addEventListener('click', () => {
