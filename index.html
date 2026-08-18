@@ -1070,7 +1070,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.4.6';
+    const APP_VERSION = '1.4.7';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1471,6 +1471,14 @@
         return {
           name: englishTcg[2].trim(),
           quantity: Math.min(999, parseInt(englishTcg[1], 10) || 1),
+        };
+      }
+
+      const withLeadingQty = trimmed.match(/^(\d+)\s+(.+)$/);
+      if (withLeadingQty) {
+        return {
+          name: withLeadingQty[2].trim(),
+          quantity: Math.min(999, parseInt(withLeadingQty[1], 10) || 1),
         };
       }
 

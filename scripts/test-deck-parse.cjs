@@ -14,6 +14,14 @@ function parseDeckLine(line) {
     };
   }
 
+  const withLeadingQty = trimmed.match(/^(\d+)\s+(.+)$/);
+  if (withLeadingQty) {
+    return {
+      name: withLeadingQty[2].trim(),
+      quantity: Math.min(999, parseInt(withLeadingQty[1], 10) || 1),
+    };
+  }
+
   const withZhang = trimmed.match(/^(.+?)\s+(\d+)\s*[张張]\s*$/);
   if (withZhang) {
     return {
@@ -62,6 +70,14 @@ expected.forEach((exp, i) => {
     console.log(`FAIL [${i}] expected`, exp, 'got', got);
   }
 });
+const dawnCases = ['Dawn', '1 Dawn', '1 Dawn PFL 129'];
+for (const line of dawnCases) {
+  const got = parseDeckLine(line);
+  const pass = got?.name === 'Dawn' && got?.quantity === 1;
+  console.log(`${pass ? 'OK' : 'FAIL'} | "${line}" ->`, got);
+  if (!pass) ok = false;
+}
+
 console.log(entries);
 console.log(ok ? 'ALL PASS' : 'FAILED');
 process.exit(ok ? 0 : 1);
