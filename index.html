@@ -1919,13 +1919,67 @@
       return new TextDecoder('utf-8').decode(buffer);
     }
 
+    function isImageFile(file) {
+      return file.type?.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name || '');
+    }
+
+    function filterImageFiles(files) {
+      return files.filter(isImageFile);
+    }
+
+    async function collectImageUrlsFromSnapshot(snapshot, dataTransfer) {
+      if (snapshot?.imageUrlsPromise) return snapshot.imageUrlsPromise;
+      if (dataTransfer) return extractImageUrlsAsync(dataTransfer);
+      return [];
+    }
+
     function snapshotDroppedFiles(dataTransfer) {
       const files = extractDroppedFiles(dataTransfer);
+      const htmlData = dataTransfer.getData('text/html');
+      const uriListData = dataTransfer.getData('text/uri-list') || dataTransfer.getData('text/plain') || '';
+
+      const imageUrlsPromise = (async () => {
+        const urls = new Set();
+        parseHtmlForUrls(htmlData, urls);
+        uriListData.split('\n').forEach((line) => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return;
+          if (isLikelyImageUrl(trimmed)) urls.add(resolveUrl(trimmed));
+        });
+        if (dataTransfer.items) {
+          const tasks = [];
+          for (const item of dataTransfer.items) {
+            if (item.kind === 'string' && item.type === 'text/html') {
+              tasks.push(new Promise((resolve) => {
+                item.getAsString((html) => {
+                  parseHtmlForUrls(html, urls);
+                  resolve();
+                });
+              }));
+            }
+            if (item.kind === 'string' && item.type === 'text/uri-list') {
+              tasks.push(new Promise((resolve) => {
+                item.getAsString((text) => {
+                  text.split('\n').forEach((line) => {
+                    const trimmed = line.trim();
+                    if (trimmed && isLikelyImageUrl(trimmed)) urls.add(resolveUrl(trimmed));
+                  });
+                  resolve();
+                });
+              }));
+            }
+          }
+          await Promise.all(tasks);
+        }
+        return [...urls];
+      })();
+
       const reads = Promise.all(files.map(async (file) => ({
         file,
-        text: await readFileAsText(file),
+        text: (isDeckFileName(file.name) || !isImageFile(file)) ? await readFileAsText(file) : '',
       })));
-      return { files, reads };
+
+      return { files, reads, imageUrlsPromise };
     }
 
     function findDeckFilesFromSnapshots(fileSnapshots) {
