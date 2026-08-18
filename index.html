@@ -1058,7 +1058,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.3.14';
+    const APP_VERSION = '1.3.15';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1999,15 +1999,9 @@
 
     async function addDeckFromFile(file, prefetchedText) {
       const text = prefetchedText ?? await readFileAsText(file);
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:addDeckFromFile',message:'Deck text read',data:{fileName:file.name,fileSize:file.size,textLen:text?.length,textStart:String(text).slice(0,40)},timestamp:Date.now(),runId:'deck-drop-fix4',hypothesisId:'H4-async-read'})}).catch(()=>{});
-      // #endregion
       const deckData = parseDeckFileText(text);
       const added = addDeckData(deckData);
       const deckLabel = deckData.name || deckNameFromFilePath(file.name);
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:addDeckFromFile',message:'Deck file loaded',data:{fileName:file.name,fileSize:file.size,textLen:text?.length,cardCount:deckData.cards?.length,added,deckLabel,cardsTotal:cards.length},timestamp:Date.now(),runId:'deck-drop-fix3',hypothesisId:'H3-updateUI-wipe'})}).catch(()=>{});
-      // #endregion
       return { added, deckLabel };
     }
 
@@ -2044,17 +2038,9 @@
         text: await readFileAsText(file),
       })));
 
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop files received',data:{allCount:allFiles.length,fileNames:allFiles.map(f=>f.name),fileSizes:allFiles.map(f=>f.size),nameMatch:allFiles.map(f=>isDeckFileName(f.name))},timestamp:Date.now(),runId:'deck-drop-fix4',hypothesisId:'H4-async-read'})}).catch(()=>{});
-      // #endregion
-
       try {
         const fileSnapshots = await fileSnapshotsPromise;
         const deckEntries = findDeckFilesFromSnapshots(fileSnapshots);
-
-        // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Deck files identified',data:{deckCount:deckEntries.length,deckNames:deckEntries.map(e=>(e.file??e).name)},timestamp:Date.now(),runId:'deck-drop-fix2',hypothesisId:'H2-macos-copy-suffix'})}).catch(()=>{});
-        // #endregion
 
         if (deckEntries.length > 0) {
           await handleDeckFilesDrop(deckEntries);
@@ -2065,10 +2051,6 @@
         const imageFiles = filterImageFiles(allFiles);
         const substantialFiles = imageFiles.filter((f) => f.size >= 10000);
         const localFiles = substantialFiles.length > 0 ? substantialFiles : imageFiles;
-
-        // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Image drop path',data:{imageCount:imageFiles.length,imageNames:imageFiles.map(f=>f.name)},timestamp:Date.now(),runId:'image-drop-fix',hypothesisId:'H5-datatransfer-cleared'})}).catch(()=>{});
-        // #endregion
 
         if (localFiles.length > 1) {
           const added = await addCardsFromFiles(localFiles);
@@ -2115,9 +2097,6 @@
           dropStatusMessage = '無法載入圖片（該網站封鎖外連，請先下載再拖入）';
         }
         deckStatus.textContent = dropStatusMessage;
-        // #region agent log
-        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop failed',data:{error:err.message,fileNames:allFiles.map(f=>f.name),fileSizes:allFiles.map(f=>f.size)},timestamp:Date.now(),runId:'deck-drop-fix4',hypothesisId:'H4-async-read'})}).catch(()=>{});
-        // #endregion
       } finally {
         dropLock = false;
         updateUI({ keepStatus: Boolean(dropStatusMessage) });
@@ -2634,9 +2613,6 @@
       }
 
       page.appendChild(grid);
-      // #region agent log
-      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:createBackPageElement',message:'Back grid offset applied',data:{inlineTop:grid.style.top,inlineLeft:grid.style.left,cssVarTop:backOff.top,cssVarLeft:backOff.left,pdfMarginT:getPdfLayout().marginTBack,pdfMarginL:getPdfLayout().marginLBack,appVersion:APP_VERSION},timestamp:Date.now(),runId:'verify-1115',hypothesisId:'H3-css-single-source'})}).catch(()=>{});
-      // #endregion
       return page;
     }
 
