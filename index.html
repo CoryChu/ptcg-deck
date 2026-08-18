@@ -1058,7 +1058,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.3.9';
+    const APP_VERSION = '1.3.10';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1656,15 +1656,37 @@
       return candidates.slice(0, maxCount);
     }
 
-    function dedupeImageFiles(files) {
+    function dedupeFiles(files) {
       const seen = new Set();
       return files.filter((file) => {
-        if (!file?.type?.startsWith('image/')) return false;
+        if (!file) return false;
         const key = `${file.name}|${file.size}|${file.lastModified}|${file.type}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
+    }
+
+    function dedupeImageFiles(files) {
+      return dedupeFiles(files).filter((file) => (
+        file.type?.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name || '')
+      ));
+    }
+
+    function extractDroppedFiles(dt) {
+      const files = [];
+      if (dt.files?.length) {
+        Array.from(dt.files).forEach((f) => files.push(f));
+      }
+      if (dt.items) {
+        for (const item of dt.items) {
+          if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file) files.push(file);
+          }
+        }
+      }
+      return dedupeFiles(files);
     }
 
     function pickBestImageFile(files) {
@@ -1784,19 +1806,9 @@
     }
 
     function extractImageFiles(dt) {
-      const files = [];
-      if (dt.files?.length) {
-        Array.from(dt.files).forEach((f) => files.push(f));
-      }
-      if (dt.items) {
-        for (const item of dt.items) {
-          if (item.kind === 'file') {
-            const file = item.getAsFile();
-            if (file) files.push(file);
-          }
-        }
-      }
-      return dedupeImageFiles(files);
+      return extractDroppedFiles(dt).filter((file) => (
+        file.type?.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name || '')
+      ));
     }
 
     function blobToDataUrl(blob) {
@@ -1914,8 +1926,12 @@
       dropLock = true;
       lastDropAt = now;
 
-      const allFiles = extractImageFiles(dataTransfer);
+      const allFiles = extractDroppedFiles(dataTransfer);
       const deckFiles = allFiles.filter((f) => isDeckFileName(f.name));
+
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop files received',data:{allCount:allFiles.length,deckCount:deckFiles.length,fileNames:allFiles.map(f=>f.name),fileTypes:allFiles.map(f=>f.type)},timestamp:Date.now(),runId:'deck-drop-fix',hypothesisId:'H1-dedupe-filter'})}).catch(()=>{});
+      // #endregion
 
       try {
         if (deckFiles.length > 0) {
@@ -1923,7 +1939,7 @@
           return;
         }
 
-        const imageFiles = allFiles.filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(f.name));
+        const imageFiles = extractImageFiles(dataTransfer);
         const substantialFiles = imageFiles.filter((f) => f.size >= 10000);
         const localFiles = substantialFiles.length > 0 ? substantialFiles : imageFiles;
 
@@ -1937,7 +1953,12 @@
         const bestUrl = pickBestImageUrls(allUrls, 1)[0];
         const bestFile = pickBestImageFile(imageFiles);
 
-        if (!bestFile && !bestUrl) return;
+        if (!bestFile && !bestUrl) {
+          if (allFiles.length > 0) {
+            deckStatus.textContent = '無法辨識拖入的檔案（請拖入卡牌圖片或 .ptcgdeck 牌組檔）';
+          }
+          return;
+        }
 
         deckStatus.textContent = '正在載入圖片…';
 
