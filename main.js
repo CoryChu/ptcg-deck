@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, nativeImage } = require('electron')
 const fs = require('fs');
 const path = require('path');
 const { searchPokemonCards } = require('./api/pokemon-search-lib');
+const { resolveChineseCardName } = require('./api/card-name-resolve-lib');
 
 const appIconPath = path.join(__dirname, 'assets', 'icon.icns');
 
@@ -139,6 +140,14 @@ ipcMain.handle('search-pokemon-cards', async (_event, keyword) => {
     return await searchPokemonCards(keyword);
   } catch (err) {
     return { ok: false, error: err.message, images: [] };
+  }
+});
+
+ipcMain.handle('resolve-card-name', async (_event, name) => {
+  try {
+    return await resolveChineseCardName(name);
+  } catch (err) {
+    return { ok: false, error: err.message, chineseName: null };
   }
 });
 

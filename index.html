@@ -1069,7 +1069,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.4.0';
+    const APP_VERSION = '1.4.1';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1479,12 +1479,55 @@
       return text.split(/\r?\n/).map(parseDeckLine).filter(Boolean);
     }
 
+    function hasCjkText(text) {
+      return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(String(text || ''));
+    }
+
+    async function resolveCardNameApi(name) {
+      if (isElectron) {
+        return ipcRenderer.invoke('resolve-card-name', name);
+      }
+      const res = await fetch(`/api/resolve-card-name?name=${encodeURIComponent(name)}`);
+      return res.json();
+    }
+
     async function searchPokemonCardsApi(keyword) {
       if (isElectron) {
         return ipcRenderer.invoke('search-pokemon-cards', keyword);
       }
       const res = await fetch(`/api/search-cards?keyword=${encodeURIComponent(keyword)}`);
       return res.json();
+    }
+
+    async function searchCardImagesForImport(name) {
+      let searchKeyword = name;
+      let resolvedFrom = null;
+
+      if (!hasCjkText(name)) {
+        try {
+          const resolved = await resolveCardNameApi(name);
+          // #region agent log
+          fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H4',location:'index.html:searchCardImagesForImport',message:'name resolution for import',data:{name,resolved},timestamp:Date.now(),runId:'pre-fix'})}).catch(()=>{});
+          // #endregion
+          if (resolved?.ok && resolved.chineseName) {
+            searchKeyword = resolved.chineseName;
+            resolvedFrom = resolved.source;
+          }
+        } catch {
+          // keep original English name
+        }
+      }
+
+      let searchResult = await searchPokemonCardsApi(searchKeyword);
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H4',location:'index.html:searchCardImagesForImport',message:'HK image search result',data:{name,searchKeyword,resolvedFrom,count:searchResult?.images?.length||0,ok:searchResult?.ok},timestamp:Date.now(),runId:'pre-fix'})}).catch(()=>{});
+      // #endregion
+
+      if ((!searchResult.ok || searchResult.images.length === 0) && searchKeyword !== name) {
+        searchResult = await searchPokemonCardsApi(name);
+      }
+
+      return { searchResult, searchKeyword, resolvedFrom };
     }
 
     function getCardThumbUrl(imageUrl) {
@@ -1542,13 +1585,21 @@
 
       for (let i = 0; i < entries.length; i++) {
         const { name, quantity } = entries[i];
-        const progress = `搜尋中 (${i + 1}/${entries.length})：${name}…`;
+        let progress = `搜尋中 (${i + 1}/${entries.length})：${name}…`;
         setImportStatus(progress);
         deckStatus.textContent = progress;
 
         let searchResult;
+        let searchKeyword = name;
         try {
-          searchResult = await searchPokemonCardsApi(name);
+          const lookup = await searchCardImagesForImport(name);
+          searchResult = lookup.searchResult;
+          searchKeyword = lookup.searchKeyword;
+          if (lookup.searchKeyword !== name) {
+            progress = `搜尋中 (${i + 1}/${entries.length})：${name} → ${lookup.searchKeyword}…`;
+            setImportStatus(progress);
+            deckStatus.textContent = progress;
+          }
         } catch {
           summary.failed.push(`${name}（搜尋失敗）`);
           continue;
