@@ -1069,7 +1069,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.4.3';
+    const APP_VERSION = '1.4.4';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1458,6 +1458,19 @@
     function parseDeckLine(line) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return null;
+
+      if (/^(Pokémon|Pokemon|Trainer|Energy|Total Cards?)\s*:\s*\d+\s*$/i.test(trimmed)) {
+        return null;
+      }
+
+      const englishTcg = trimmed.match(/^(\d+)\s+(.+?)\s+[A-Z]{3}\s+\d+\s*$/);
+      if (englishTcg) {
+        return {
+          name: englishTcg[2].trim(),
+          quantity: Math.min(999, parseInt(englishTcg[1], 10) || 1),
+        };
+      }
+
       const withZhang = trimmed.match(/^(.+?)\s+(\d+)\s*[张張]\s*$/);
       if (withZhang) {
         return {
