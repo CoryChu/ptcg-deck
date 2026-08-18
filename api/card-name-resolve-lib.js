@@ -1,12 +1,13 @@
+const {
+  parse52pokeSearchItems,
+  parseWebSearchResults,
+  hasCjk,
+  toTraditionalForHk,
+} = require('./card-name-parse-lib');
+
 const POKE52_API = 'https://wiki.52poke.com/api.php';
 const POKE52_SEARCH = 'https://wiki.52poke.com/wiki/Special:Search';
 const DDG_SEARCH = 'https://html.duckduckgo.com/html/';
-
-const CJK_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
-const HEADING_RE = /class="mw-search-result-heading"[^>]*>\s*<a[^>]*title="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
-const TCG_TITLE_RE = /([\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff][\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff·\s]{0,24}?)（Tcg）/gi;
-const BOOK_TITLE_RE = /『([\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff][^』]{1,30})』/g;
-const EN_IN_SNIPPET_RE = /([\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff][^（]{1,30}?)（[^）]*英文︰[^）]*）/g;
 
 const FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -26,66 +27,15 @@ function agentLog(hypothesisId, location, message, data) {
       message,
       data,
       timestamp: Date.now(),
-      runId: data?.runId || 'pre-fix',
+      runId: data?.runId || 'post-fix',
     }),
   }).catch(() => {});
 }
 // #endregion
 
-function hasCjk(text) {
-  return CJK_RE.test(String(text || ''));
-}
-
-function normalizeEnglish(text) {
-  return String(text || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[''']/g, "'")
-    .replace(/\s+/g, ' ');
-}
-
-function extractChineseBase(title) {
-  const trimmed = String(title || '').trim();
-  if (!trimmed || !hasCjk(trimmed)) return null;
-  const base = trimmed.split('（')[0].trim();
-  return hasCjk(base) ? base : null;
-}
-
-function englishMatchesSnippet(snippet, englishName) {
-  const normalizedEn = normalizeEnglish(englishName);
-  const decoded = snippet
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/<[^>]+>/g, ' ');
-  const normalizedSnippet = normalizeEnglish(decoded);
-  return normalizedSnippet.includes(normalizedEn);
-}
-
-function parse52pokeSearchItems(items, englishName) {
-  const tcgMatches = [];
-  const snippetMatches = [];
-
-  for (const item of items) {
-    const title = String(item?.title || item?.heading || '').trim();
-    if (title.includes('（TCG）')) {
-      const chinese = extractChineseBase(title);
-      if (chinese) tcgMatches.push(chinese);
-    }
-
-    const snippet = String(item?.snippet || item?.searchresult || '');
-    if (englishMatchesSnippet(snippet, englishName)) {
-      const plain = snippet.replace(/<[^>]+>/g, '');
-      const inline = plain.match(/([\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff][^（]{1,30}?)（[^）]*英文︰/);
-      if (inline) {
-        const chinese = inline[1].trim();
-        if (hasCjk(chinese)) snippetMatches.push(chinese);
-      }
-    }
-  }
-
-  if (snippetMatches.length > 0) return snippetMatches[0];
-  if (tcgMatches.length > 0) return tcgMatches[0];
-  return null;
+function finalizeChineseName(name) {
+  if (!name) return null;
+  return toTraditionalForHk(name.trim());
 }
 
 function parse52pokeResults(html, englishName) {
@@ -107,60 +57,45 @@ function parse52pokeResults(html, englishName) {
   return parse52pokeSearchItems(items, englishName);
 }
 
-function parseWebSearchResults(html) {
-  const found = new Set();
-
-  for (const re of [BOOK_TITLE_RE, TCG_TITLE_RE]) {
-    re.lastIndex = 0;
-    let match;
-    while ((match = re.exec(html)) !== null) {
-      const name = match[1].trim();
-      if (hasCjk(name) && name.length <= 20) found.add(name);
-    }
-  }
-
-  EN_IN_SNIPPET_RE.lastIndex = 0;
-  let snippetMatch;
-  while ((snippetMatch = EN_IN_SNIPPET_RE.exec(html)) !== null) {
-    const name = snippetMatch[1].trim();
-    if (hasCjk(name)) found.add(name);
-  }
-
-  return [...found];
-}
-
-async function fetch52pokeChineseNameViaApi(englishName) {
+async function query52pokeSearch(searchTerm, englishName) {
   const url = `${POKE52_API}?${new URLSearchParams({
     action: 'query',
     list: 'search',
-    srsearch: englishName,
+    srsearch: searchTerm,
     format: 'json',
   }).toString()}`;
   const response = await fetch(url, {
     headers: { ...FETCH_HEADERS, Referer: 'https://wiki.52poke.com/' },
     redirect: 'follow',
   });
-  if (!response.ok) {
-    // #region agent log
-    agentLog('H5', 'card-name-resolve-lib.js:fetch52pokeApi', '52poke API HTTP error', {
-      originalName: englishName,
-      status: response.status,
-    });
-    // #endregion
-    return null;
-  }
+  if (!response.ok) return null;
 
   const data = await response.json();
   const items = data?.query?.search || [];
-  const parsed = parse52pokeSearchItems(items, englishName);
-  // #region agent log
-  agentLog('H5', 'card-name-resolve-lib.js:fetch52pokeApi', '52poke API parsed', {
-    originalName: englishName,
-    resultCount: items.length,
-    parsed,
-  });
-  // #endregion
-  return parsed;
+  return parse52pokeSearchItems(items, englishName);
+}
+
+async function fetch52pokeChineseNameViaApi(englishName) {
+  const queries = [
+    englishName,
+    `${englishName} TCG`,
+    `ptcg ${englishName}`,
+  ];
+
+  for (const query of queries) {
+    const parsed = await query52pokeSearch(query, englishName);
+    if (parsed) {
+      // #region agent log
+      agentLog('H8', 'card-name-resolve-lib.js:fetch52pokeApi', '52poke API parsed', {
+        originalName: englishName,
+        query,
+        parsed,
+      });
+      // #endregion
+      return parsed;
+    }
+  }
+  return null;
 }
 
 async function fetch52pokeChineseNameViaHtml(englishName) {
@@ -172,17 +107,7 @@ async function fetch52pokeChineseNameViaHtml(englishName) {
   if (!response.ok) return null;
 
   const html = await response.text();
-  if (!html.includes('mw-search-result-heading')) {
-    // #region agent log
-    agentLog('H5', 'card-name-resolve-lib.js:fetch52pokeHtml', '52poke HTML missing results', {
-      originalName: englishName,
-      blocked: html.includes('__CF$cv$params') || html.includes('challenge-platform'),
-      htmlLength: html.length,
-    });
-    // #endregion
-    return null;
-  }
-
+  if (!html.includes('mw-search-result-heading')) return null;
   return parse52pokeResults(html, englishName);
 }
 
@@ -193,38 +118,40 @@ async function fetch52pokeChineseName(englishName) {
 }
 
 async function fetchWebSearchChineseName(englishName) {
-  const query = `ptcg ${englishName} 中文`;
-  const body = new URLSearchParams({ q: query, b: '', kl: 'wt-wt' });
-  const response = await fetch(DDG_SEARCH, {
-    method: 'POST',
-    headers: {
-      ...FETCH_HEADERS,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Referer: 'https://html.duckduckgo.com/',
-    },
-    body: body.toString(),
-    redirect: 'follow',
-  });
-  if (!response.ok) {
-    // #region agent log
-    agentLog('H3', 'card-name-resolve-lib.js:fetchWebSearch', 'web search HTTP error', {
-      originalName: englishName,
-      status: response.status,
+  const queries = [
+    `ptcg ${englishName} 中文`,
+    `ptcg ${englishName} 官方中文`,
+  ];
+
+  for (const query of queries) {
+    const body = new URLSearchParams({ q: query, b: '', kl: 'wt-wt' });
+    const response = await fetch(DDG_SEARCH, {
+      method: 'POST',
+      headers: {
+        ...FETCH_HEADERS,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Referer: 'https://html.duckduckgo.com/',
+      },
+      body: body.toString(),
+      redirect: 'follow',
     });
-    // #endregion
-    return null;
+    if (!response.ok) continue;
+
+    const html = await response.text();
+    const parsed = parseWebSearchResults(html, englishName);
+    if (parsed) {
+      // #region agent log
+      agentLog('H9', 'card-name-resolve-lib.js:fetchWebSearch', 'web search parsed', {
+        originalName: englishName,
+        query,
+        parsed,
+      });
+      // #endregion
+      return parsed;
+    }
   }
 
-  const html = await response.text();
-  const candidates = parseWebSearchResults(html);
-  // #region agent log
-  agentLog('H3', 'card-name-resolve-lib.js:fetchWebSearch', 'web search parsed', {
-    originalName: englishName,
-    candidateCount: candidates.length,
-    firstCandidate: candidates[0] || null,
-  });
-  // #endregion
-  return candidates[0] || null;
+  return null;
 }
 
 async function resolveChineseCardName(englishName) {
@@ -234,21 +161,8 @@ async function resolveChineseCardName(englishName) {
   }
 
   if (hasCjk(originalName)) {
-    // #region agent log
-    agentLog('H1', 'card-name-resolve-lib.js:resolveChineseCardName', 'skip lookup (already CJK)', {
-      originalName,
-      chineseName: originalName,
-      source: 'input',
-    });
-    // #endregion
     return { ok: true, originalName, chineseName: originalName, source: 'input' };
   }
-
-  // #region agent log
-  agentLog('H1', 'card-name-resolve-lib.js:resolveChineseCardName', 'english name needs lookup', {
-    originalName,
-  });
-  // #endregion
 
   let chineseName = null;
   let source = null;
@@ -257,12 +171,10 @@ async function resolveChineseCardName(englishName) {
     chineseName = await fetch52pokeChineseName(originalName);
     if (chineseName) source = '52poke';
   } catch (err) {
-    // #region agent log
     agentLog('H2', 'card-name-resolve-lib.js:fetch52poke', '52poke lookup failed', {
       originalName,
       error: err.message,
     });
-    // #endregion
   }
 
   if (!chineseName) {
@@ -270,23 +182,21 @@ async function resolveChineseCardName(englishName) {
       chineseName = await fetchWebSearchChineseName(originalName);
       if (chineseName) source = 'web-search';
     } catch (err) {
-      // #region agent log
       agentLog('H3', 'card-name-resolve-lib.js:fetchWebSearch', 'web search lookup failed', {
         originalName,
         error: err.message,
       });
-      // #endregion
     }
   }
 
-  // #region agent log
-  agentLog(chineseName ? 'H2' : 'H3', 'card-name-resolve-lib.js:resolveChineseCardName', 'lookup result', {
+  chineseName = finalizeChineseName(chineseName);
+
+  agentLog(chineseName ? 'H8' : 'H9', 'card-name-resolve-lib.js:resolveChineseCardName', 'lookup result', {
     originalName,
     chineseName,
     source,
     resolved: Boolean(chineseName),
   });
-  // #endregion
 
   if (!chineseName) {
     return { ok: false, originalName, chineseName: null, source: null, error: 'no chinese name found' };
@@ -298,4 +208,5 @@ async function resolveChineseCardName(englishName) {
 module.exports = {
   hasCjk,
   resolveChineseCardName,
+  toTraditionalForHk,
 };

@@ -2,24 +2,27 @@ const { resolveChineseCardName } = require('../api/card-name-resolve-lib');
 const { searchPokemonCards } = require('../api/pokemon-search-lib');
 
 const SAMPLES = [
-  'Jumbo Ice Cream',
+  'Dawn',
+  'Ultra Ball',
+  'Rare Candy',
   "Boss's Orders",
-  "Professor's Research",
+  "Lillie's Determination",
+  'Night Stretcher',
+  'Jumbo Ice Cream',
 ];
 
 (async () => {
+  let ok = 0;
+  let fail = 0;
   for (const name of SAMPLES) {
-    console.log(`\n=== ${name} ===`);
-    const enDirect = await searchPokemonCards(name);
-    console.log(`EN direct: ${enDirect.count} images`);
-
     const resolved = await resolveChineseCardName(name);
-    console.log(`Resolved: ${resolved.ok ? resolved.chineseName : resolved.error} (${resolved.source || 'none'})`);
-
-    if (resolved.chineseName && resolved.chineseName !== name) {
-      const zhResult = await searchPokemonCards(resolved.chineseName);
-      console.log(`ZH search: ${zhResult.count} images`);
-      if (zhResult.images?.[0]) console.log(`  ${zhResult.images[0]}`);
-    }
+    const zh = resolved.chineseName || null;
+    const img = zh ? (await searchPokemonCards(zh)).count : 0;
+    const pass = resolved.ok && img > 0;
+    if (pass) ok += 1;
+    else fail += 1;
+    console.log(`${pass ? 'OK' : 'FAIL'} | ${name} -> ${zh || resolved.error} (${resolved.source || '-'}) | images: ${img}`);
   }
+  console.log(`\n${ok} passed / ${fail} failed / ${SAMPLES.length} total`);
+  process.exit(fail > 0 ? 1 : 0);
 })();

@@ -1009,6 +1009,7 @@
   <div id="print-root"></div>
 
   <script src="assets/jspdf.umd.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js'"></script>
+  <script src="assets/card-name-parse.js"></script>
 
   <div id="importOverlay" class="import-overlay" role="dialog" aria-modal="true" aria-label="匯入 Deck">
     <div class="import-dialog">
@@ -1069,7 +1070,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.4.5';
+    const APP_VERSION = '1.4.6';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1498,42 +1499,8 @@
       return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(String(text || ''));
     }
 
-    function normalizeEnglishCardName(text) {
-      return String(text || '').trim().toLowerCase().replace(/[''']/g, "'").replace(/\s+/g, ' ');
-    }
-
-    function extractChineseFrom52pokeItems(items, englishName) {
-      const normalizedEn = normalizeEnglishCardName(englishName);
-      const snippetMatches = [];
-      const tcgMatches = [];
-
-      for (const item of items) {
-        const title = String(item?.title || '').trim();
-        if (title.includes('（TCG）')) {
-          const base = title.split('（')[0].trim();
-          if (hasCjkText(base)) tcgMatches.push(base);
-        }
-
-        const snippet = String(item?.snippet || '')
-          .replace(/&#039;/g, "'")
-          .replace(/&amp;/g, '&')
-          .replace(/<[^>]+>/g, ' ');
-        if (normalizeEnglishCardName(snippet).includes(normalizedEn)) {
-          const inline = snippet.match(/([\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff][^（]{1,30}?)（[^）]*英文︰/);
-          if (inline) {
-            const chinese = inline[1].trim();
-            if (hasCjkText(chinese)) snippetMatches.push(chinese);
-          }
-        }
-      }
-
-      if (snippetMatches.length > 0) return snippetMatches[0];
-      if (tcgMatches.length > 0) return tcgMatches[0];
-      return null;
-    }
-
-    function resolveCardNameVia52pokeJsonp(name) {
-      return new Promise((resolve, reject) => {
+    function query52pokeJsonp(searchTerm) {
+      return new Promise((resolve) => {
         const callbackName = `_poke52_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const script = document.createElement('script');
         let settled = false;
@@ -1543,42 +1510,52 @@
           delete window[callbackName];
         };
 
-        const finish = (result) => {
+        const finish = (items) => {
           if (settled) return;
           settled = true;
           cleanup();
-          resolve(result);
+          resolve(items);
         };
 
-        const timeoutId = window.setTimeout(() => {
-          finish({ ok: false, error: 'jsonp timeout', chineseName: null, source: null });
-        }, 12000);
+        const timeoutId = window.setTimeout(() => finish([]), 12000);
 
         window[callbackName] = (data) => {
           window.clearTimeout(timeoutId);
-          const items = data?.query?.search || [];
-          const chineseName = extractChineseFrom52pokeItems(items, name);
-          // #region agent log
-          fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H6',location:'index.html:resolveCardNameVia52pokeJsonp',message:'client jsonp lookup result',data:{name,resultCount:items.length,chineseName},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
-          // #endregion
-          finish(chineseName
-            ? { ok: true, originalName: name, chineseName, source: '52poke-client' }
-            : { ok: false, originalName: name, chineseName: null, source: null, error: 'no chinese name found' });
+          finish(data?.query?.search || []);
         };
 
         script.src = `https://wiki.52poke.com/api.php?${new URLSearchParams({
           action: 'query',
           list: 'search',
-          srsearch: name,
+          srsearch: searchTerm,
           format: 'json',
           callback: callbackName,
         }).toString()}`;
         script.onerror = () => {
           window.clearTimeout(timeoutId);
-          finish({ ok: false, error: 'jsonp failed', chineseName: null, source: null });
+          finish([]);
         };
         document.head.appendChild(script);
       });
+    }
+
+    async function resolveCardNameVia52pokeJsonp(name) {
+      const parse = window.CardNameParse;
+      const queries = [name, `${name} TCG`, `ptcg ${name}`];
+
+      for (const query of queries) {
+        const items = await query52pokeJsonp(query);
+        const chineseName = parse.parse52pokeSearchItems(items, name);
+        if (chineseName) {
+          const traditional = parse.toTraditionalForHk(chineseName);
+          // #region agent log
+          fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H8',location:'index.html:resolveCardNameVia52pokeJsonp',message:'client jsonp lookup result',data:{name,query,chineseName:traditional},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
+          // #endregion
+          return { ok: true, originalName: name, chineseName: traditional, source: '52poke-client' };
+        }
+      }
+
+      return { ok: false, originalName: name, chineseName: null, source: null, error: 'no chinese name found' };
     }
 
     async function resolveCardNameForImport(name) {
@@ -1632,7 +1609,18 @@
         }
       }
 
-      let searchResult = await searchPokemonCardsApi(searchKeyword);
+      let searchResult = { ok: false, images: [] };
+      const keywords = hasCjkText(searchKeyword)
+        ? window.CardNameParse.getChineseSearchKeywords(searchKeyword)
+        : [searchKeyword];
+
+      for (const kw of keywords) {
+        searchResult = await searchPokemonCardsApi(kw);
+        if (searchResult.ok && searchResult.images.length > 0) {
+          searchKeyword = kw;
+          break;
+        }
+      }
       // #region agent log
       fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H4',location:'index.html:searchCardImagesForImport',message:'HK image search result',data:{name,searchKeyword,resolvedFrom,count:searchResult?.images?.length||0,ok:searchResult?.ok},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
       // #endregion
