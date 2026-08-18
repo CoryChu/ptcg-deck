@@ -1058,7 +1058,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.3.11';
+    const APP_VERSION = '1.3.12';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1342,7 +1342,8 @@
       return downloadPdfWithJsPdf(flatCards, { includeBackPages: doubleSidedPrint });
     }
 
-    function updateUI() {
+    function updateUI(options = {}) {
+      const { keepStatus = false } = options;
       const hasCards = cards.length > 0;
       const totalQty = cards.reduce((sum, c) => sum + c.quantity, 0);
       const canOutput = hasCards && totalQty > 0;
@@ -1355,9 +1356,11 @@
         ? `共 ${totalQty} 張（${cards.length} 種）`
         : '共 0 張';
       cardCountBadge.classList.toggle('is-empty', totalQty === 0);
-      deckStatus.textContent = currentDeckPath
-        ? `已儲存：${getDeckDisplayName()}`
-        : (hasCards ? '未儲存' : '');
+      if (!keepStatus) {
+        deckStatus.textContent = currentDeckPath
+          ? `已儲存：${getDeckDisplayName()}`
+          : (hasCards ? '未儲存' : '');
+      }
     }
 
     function setImportStatus(message, tone = '') {
@@ -1907,7 +1910,7 @@
         if (file.type?.startsWith('image/')) continue;
         if (file.size > 20 * 1024 * 1024) continue;
         try {
-          const text = await file.text();
+          const text = await readFileAsText(file);
           parseDeckFileText(text);
           candidates.push({ file, text });
         } catch {
@@ -1917,11 +1920,26 @@
       return candidates;
     }
 
+    async function readFileAsText(file) {
+      if (typeof file.text === 'function') {
+        return file.text();
+      }
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('讀取檔案失敗'));
+        reader.readAsText(file);
+      });
+    }
+
     async function addDeckFromFile(file, prefetchedText) {
-      const text = prefetchedText ?? await file.text();
+      const text = prefetchedText ?? await readFileAsText(file);
       const deckData = parseDeckFileText(text);
       const added = addDeckData(deckData);
       const deckLabel = deckData.name || deckNameFromFilePath(file.name);
+      // #region agent log
+      fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:addDeckFromFile',message:'Deck file loaded',data:{fileName:file.name,fileSize:file.size,textLen:text?.length,cardCount:deckData.cards?.length,added,deckLabel,cardsTotal:cards.length},timestamp:Date.now(),runId:'deck-drop-fix3',hypothesisId:'H3-updateUI-wipe'})}).catch(()=>{});
+      // #endregion
       return { added, deckLabel };
     }
 
@@ -1950,6 +1968,8 @@
       dropLock = true;
       lastDropAt = now;
 
+      let dropStatusMessage = '';
+
       const allFiles = extractDroppedFiles(dataTransfer);
 
       // #region agent log
@@ -1965,10 +1985,9 @@
 
         if (deckEntries.length > 0) {
           await handleDeckFilesDrop(deckEntries);
+          dropStatusMessage = deckStatus.textContent;
           return;
         }
-
-        const deckFiles = [];
 
         const imageFiles = extractImageFiles(dataTransfer);
         const substantialFiles = imageFiles.filter((f) => f.size >= 10000);
@@ -1976,7 +1995,8 @@
 
         if (localFiles.length > 1) {
           const added = await addCardsFromFiles(localFiles);
-          deckStatus.textContent = added > 0 ? `已加入 ${added} 張圖片` : '無法載入圖片';
+          dropStatusMessage = added > 0 ? `已加入 ${added} 張圖片` : '無法載入圖片';
+          deckStatus.textContent = dropStatusMessage;
           return;
         }
 
@@ -1986,7 +2006,8 @@
 
         if (!bestFile && !bestUrl) {
           if (allFiles.length > 0) {
-            deckStatus.textContent = '無法辨識拖入的檔案（請拖入卡牌圖片或 .ptcgdeck 牌組檔）';
+            dropStatusMessage = '無法辨識拖入的檔案（請拖入卡牌圖片或 .ptcgdeck 牌組檔）';
+            deckStatus.textContent = dropStatusMessage;
           }
           return;
         }
@@ -1996,28 +2017,34 @@
         // 手機拖放常同時帶小縮圖檔與完整圖片網址；大於 10KB 的檔案才優先當作原圖
         if (bestFile && bestFile.size >= 10000) {
           await addCardFromFile(bestFile);
-          deckStatus.textContent = '已加入 1 張圖片';
+          dropStatusMessage = '已加入 1 張圖片';
         } else if (bestUrl) {
           const dataUrl = await fetchImageAsDataUrl(bestUrl);
           if (!(await validateImageDataUrl(dataUrl))) {
             throw new Error('invalid image');
           }
           addCardFromSrc(filenameFromUrl(bestUrl), dataUrl);
-          deckStatus.textContent = '已從網頁加入 1 張圖片';
+          dropStatusMessage = '已從網頁加入 1 張圖片';
         } else if (bestFile) {
           await addCardFromFile(bestFile);
-          deckStatus.textContent = '已加入 1 張圖片';
+          dropStatusMessage = '已加入 1 張圖片';
         }
+        deckStatus.textContent = dropStatusMessage;
       } catch (err) {
         const hadDeckCandidate = allFiles.some((f) => isDeckFileName(f.name) || !f.type?.startsWith('image/'));
         if (hadDeckCandidate) {
-          deckStatus.textContent = `無法加入牌組：${err.message || '無效的牌組檔案'}`;
+          dropStatusMessage = `無法加入牌組：${err.message || '無效的牌組檔案'}`;
         } else {
-          deckStatus.textContent = '無法載入圖片（該網站封鎖外連，請先下載再拖入）';
+          dropStatusMessage = '無法載入圖片（該網站封鎖外連，請先下載再拖入）';
         }
+        deckStatus.textContent = dropStatusMessage;
+        // #region agent log
+        fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',location:'index.html:handleDrop',message:'Drop failed',data:{error:err.message,fileNames:allFiles.map(f=>f.name)},timestamp:Date.now(),runId:'deck-drop-fix3',hypothesisId:'H3-updateUI-wipe'})}).catch(()=>{});
+        // #endregion
       } finally {
         dropLock = false;
-        updateUI();
+        updateUI({ keepStatus: Boolean(dropStatusMessage) });
+        if (dropStatusMessage) deckStatus.textContent = dropStatusMessage;
       }
     }
 
@@ -2819,8 +2846,8 @@
       try {
         const added = addDeckData(result.deckData);
         const deckLabel = result.deckData.name || deckNameFromFilePath(result.filePath);
+        updateUI({ keepStatus: true });
         deckStatus.textContent = `已加入 ${added} 張卡牌（來自「${deckLabel}」）`;
-        updateUI();
       } catch (err) {
         alert('無法加入牌組：' + err.message);
       }
