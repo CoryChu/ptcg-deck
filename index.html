@@ -1069,7 +1069,7 @@
 
     const ipcRenderer = isElectron ? require('electron').ipcRenderer : null;
 
-    const APP_VERSION = '1.4.4';
+    const APP_VERSION = '1.4.5';
     const CARDS_PER_PAGE = 9;
     const BACK_IMAGE_SRC = 'assets/Back_of_card.png';
     const GRID_OFFSET_TOP = '16.5mm';
@@ -1173,6 +1173,8 @@
     const btnCancelPick = document.getElementById('btnCancelPick');
     const PTCG_SEARCH_REFERER = 'https://asia.pokemon-card.com/hk/card-search/';
     let cardPickResolve = null;
+    let importInProgress = false;
+    let importAbortRequested = false;
     const deckStatus = document.getElementById('deckStatus');
     document.getElementById('appVersion').textContent = `v${APP_VERSION}`;
     const printRoot = document.getElementById('print-root');
@@ -1675,13 +1677,21 @@
 
     function openImportDialog() {
       setImportStatus('');
+      importAbortRequested = false;
       importOverlay.classList.add('is-open');
       importText.focus();
     }
 
-    function closeImportDialog() {
+    function closeImportDialog(options = {}) {
+      const { force = false } = options;
+      if (importInProgress && !force) return;
       importOverlay.classList.remove('is-open');
-      setImportStatus('');
+      if (!importInProgress) setImportStatus('');
+    }
+
+    function keepImportDialogOpen() {
+      importOverlay.classList.add('is-open');
+      importText.focus();
     }
 
     async function importDeckFromText(text) {
@@ -1693,9 +1703,15 @@
       const summary = { added: 0, failed: [], skipped: [] };
       currentDeckPath = null;
       btnRunImport.disabled = true;
+      importInProgress = true;
+      importAbortRequested = false;
       pushUndoSnapshot();
 
       for (let i = 0; i < entries.length; i++) {
+        if (importAbortRequested) {
+          summary.cancelled = true;
+          break;
+        }
         const { name, quantity } = entries[i];
         let progress = `搜尋中 (${i + 1}/${entries.length})：${name}…`;
         setImportStatus(progress);
@@ -1750,8 +1766,9 @@
       }
 
       renderPreview();
-      updateUI();
+      updateUI({ keepStatus: true });
       btnRunImport.disabled = false;
+      importInProgress = false;
 
       const hasIssues = summary.failed.length > 0 || summary.skipped.length > 0 || summary.cancelled;
       let message = summary.cancelled
@@ -3048,7 +3065,12 @@
         return;
       }
       if (importOverlay.classList.contains('is-open')) {
-        closeImportDialog();
+        if (importInProgress) {
+          importAbortRequested = true;
+          setImportStatus('正在取消匯入…', 'warning');
+        } else {
+          closeImportDialog({ force: true });
+        }
         return;
       }
       if (imageLightbox.classList.contains('is-open')) {
@@ -3113,7 +3135,14 @@
     btnUndo.addEventListener('click', undoDeckChange);
     btnRedo.addEventListener('click', redoDeckChange);
 
-    btnCancelImport.addEventListener('click', closeImportDialog);
+    btnCancelImport.addEventListener('click', () => {
+      if (importInProgress) {
+        importAbortRequested = true;
+        setImportStatus('正在取消匯入…', 'warning');
+        return;
+      }
+      closeImportDialog({ force: true });
+    });
 
     btnClearImport.addEventListener('click', () => {
       importText.value = '';
@@ -3135,21 +3164,29 @@
       try {
         const result = await importDeckFromText(text);
         if (!result.ok) {
+          keepImportDialogOpen();
           setImportStatus(result.error || '匯入失敗', 'error');
           if (result.summary?.added > 0) {
             deckStatus.textContent = `匯入未完成：已加入 ${result.summary.added} 張卡牌`;
+          } else if (result.summary?.failed?.length) {
+            deckStatus.textContent = `匯入失敗：${result.summary.failed.length} 張卡牌無法加入`;
           }
+          // #region agent log
+          fetch('http://127.0.0.1:7583/ingest/12998ea6-7861-4a76-b083-c5c30819e1e2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'40b010'},body:JSON.stringify({sessionId:'40b010',hypothesisId:'H7',location:'index.html:btnRunImport',message:'import failed keep dialog',data:{dialogOpen:importOverlay.classList.contains('is-open'),error:result.error},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
+          // #endregion
           return;
         }
         if (result.partial) {
+          keepImportDialogOpen();
           setImportStatus(result.message, 'warning');
           deckStatus.textContent = `匯入完成（部分失敗）：${result.message.replace(/\n/g, '；')}`;
           return;
         }
-        closeImportDialog();
+        closeImportDialog({ force: true });
         setImportStatus('');
         deckStatus.textContent = `匯入完成：${result.message}`;
       } catch (err) {
+        keepImportDialogOpen();
         setImportStatus(`匯入失敗：${err.message}`, 'error');
       }
     });
